@@ -36,24 +36,15 @@ export default function RepairChatPage() {
   }
 
   return (
-    <main className="app-shell">
-      <section className="knowledge-shell repair-shell">
-        <header className="knowledge-header">
-          <div>
-            <p className="eyebrow">RAG Repair Assistant</p>
-            <h1>检修问答</h1>
-            <p className="lead">
-              输入故障现象，系统会先检索知识库片段，再生成结构化检修建议。来源信息始终来自检索结果，便于人工复核。
-            </p>
-          </div>
-          <div className="hint-panel">
-            <span>当前链路</span>
-            <strong>Search → RAG → Sources</strong>
-            <small>暂不做 Agent，不生成工单，优先验证回答质量和来源追溯。</small>
-          </div>
-        </header>
+    <div className="page-stack">
+      <section className="pro-card chat-compose-card">
+        <div>
+          <p className="section-eyebrow">Repair Assistant</p>
+          <h2>生成检修建议</h2>
+          <p>系统会先检索知识库，再让模型基于参考片段生成结构化回答。</p>
+        </div>
 
-        <form className="chat-panel" onSubmit={(event) => void handleSubmit(event)}>
+        <form className="chat-form" onSubmit={(event) => void handleSubmit(event)}>
           <label className="field-label">
             <span>故障问题</span>
             <textarea
@@ -92,51 +83,59 @@ export default function RepairChatPage() {
             </button>
           </div>
         </form>
+      </section>
 
-        {error ? <div className="feedback error">{error}</div> : null}
+      {error ? <div className="feedback error">{error}</div> : null}
 
-        {result ? (
-          <section className="answer-panel">
+      {result ? (
+        <section className="answer-layout">
+          <div className="answer-main">
             <ResultSection title="故障理解" items={[result.fault_understanding]} />
             <ResultSection title="可能原因" items={result.possible_causes} ordered />
             <ResultSection title="排查步骤" items={result.repair_steps} ordered />
             <ResultSection title="安全注意事项" items={result.safety_notes} />
 
             {result.answer ? (
-              <details className="raw-answer">
+              <details className="pro-card raw-answer">
                 <summary>查看原始模型回答</summary>
                 <pre>{result.answer}</pre>
               </details>
             ) : null}
-
-            <div className="source-panel">
-              <h2>依据来源</h2>
-              {result.sources.length === 0 ? (
-                <div className="empty-state">没有检索到可追溯来源。</div>
-              ) : (
-                <div className="source-list">
-                  {result.sources.map((source) => (
-                    <article className="source-card" key={`${source.document_id}-${source.chunk_id}`}>
-                      <strong>{source.filename ?? source.document_title}</strong>
-                      <span>score: {source.score.toFixed(4)}</span>
-                      <small>chunk_id: {source.chunk_id}</small>
-                      <small>document_id: {source.document_id}</small>
-                      {source.chunk_index !== null && source.chunk_index !== undefined ? (
-                        <small>chunk_index: {source.chunk_index}</small>
-                      ) : null}
-                    </article>
-                  ))}
-                </div>
-              )}
-            </div>
-          </section>
-        ) : (
-          <div className="empty-state chat-empty">
-            先输入一个故障问题。建议先用 `scripts/test_rag_chat.py` 验证后端问答质量，再在这里进行交互演示。
           </div>
-        )}
-      </section>
-    </main>
+
+          <aside className="source-panel pro-card">
+            <div className="card-header compact">
+              <div>
+                <p className="section-eyebrow">Sources</p>
+                <h2>依据来源</h2>
+              </div>
+              <span className="source-count">{result.sources.length}</span>
+            </div>
+            {result.sources.length === 0 ? (
+              <div className="empty-state">没有检索到可追溯来源。</div>
+            ) : (
+              <div className="source-list">
+                {result.sources.map((source) => (
+                  <article className="source-card" key={`${source.document_id}-${source.chunk_id}`}>
+                    <strong>{source.filename ?? source.document_title}</strong>
+                    <span>score: {source.score.toFixed(4)}</span>
+                    <small>chunk_id: {source.chunk_id}</small>
+                    <small>document_id: {source.document_id}</small>
+                    {source.chunk_index !== null && source.chunk_index !== undefined ? (
+                      <small>chunk_index: {source.chunk_index}</small>
+                    ) : null}
+                  </article>
+                ))}
+              </div>
+            )}
+          </aside>
+        </section>
+      ) : (
+        <div className="empty-state">
+          先输入一个故障问题。建议先用脚本验证 RAG 质量，再在这里进行交互演示。
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -152,7 +151,7 @@ function ResultSection({
   const normalizedItems = items.filter(Boolean);
   const ListTag = ordered ? "ol" : "ul";
   return (
-    <section className="result-section">
+    <section className="pro-card result-section">
       <h2>{title}</h2>
       {normalizedItems.length === 0 ? (
         <p className="muted">暂无结构化内容。</p>

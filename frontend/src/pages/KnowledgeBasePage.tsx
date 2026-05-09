@@ -82,40 +82,27 @@ export default function KnowledgeBasePage() {
   }
 
   async function handleParse(documentId: string) {
-    setActionState({ loading: true, targetId: documentId, type: "parse" });
-    setError("");
-    try {
-      const result = await parseDocument(documentId);
-      setMessage(result.message);
-      await refreshDocuments();
-    } catch (nextError) {
-      setError(getErrorMessage(nextError));
-    } finally {
-      setActionState({ loading: false, targetId: null, type: null });
-    }
+    await runDocumentAction(documentId, "parse", () => parseDocument(documentId));
   }
 
   async function handleChunk(documentId: string) {
-    setActionState({ loading: true, targetId: documentId, type: "chunk" });
-    setError("");
-    try {
-      const result = await chunkDocument(documentId);
-      const suffix = result.chunk_count ? ` 共写入 ${result.chunk_count} 个片段。` : "";
-      setMessage(`${result.message}${suffix}`);
-      await refreshDocuments();
-    } catch (nextError) {
-      setError(getErrorMessage(nextError));
-    } finally {
-      setActionState({ loading: false, targetId: null, type: null });
-    }
+    await runDocumentAction(documentId, "chunk", () => chunkDocument(documentId));
   }
 
   async function handleIndex(documentId: string) {
-    setActionState({ loading: true, targetId: documentId, type: "index" });
+    await runDocumentAction(documentId, "index", () => indexDocument(documentId));
+  }
+
+  async function runDocumentAction(
+    documentId: string,
+    type: ActionState["type"],
+    action: () => Promise<{ message: string; chunk_count?: number | null }>,
+  ) {
+    setActionState({ loading: true, targetId: documentId, type });
     setError("");
     try {
-      const result = await indexDocument(documentId);
-      const suffix = result.chunk_count ? ` 共入库 ${result.chunk_count} 个片段。` : "";
+      const result = await action();
+      const suffix = result.chunk_count ? ` 共处理 ${result.chunk_count} 个片段。` : "";
       setMessage(`${result.message}${suffix}`);
       await refreshDocuments();
     } catch (nextError) {
@@ -125,140 +112,144 @@ export default function KnowledgeBasePage() {
     }
   }
 
+  const indexedCount = documents.filter((item) => item.status === "indexed").length;
+  const chunkedCount = documents.filter((item) => item.status === "chunked").length;
+
   return (
-    <main className="app-shell">
-      <section className="knowledge-shell">
-        <header className="knowledge-header">
-          <div>
-            <p className="eyebrow">Stage 1 · Knowledge Ingestion</p>
-            <h1>知识库管理</h1>
-            <p className="lead">
-              当前阶段只聚焦最小闭环：上传文档、解析纯文本、切分知识片段，并把处理状态稳定展示出来。
-            </p>
-          </div>
-          <div className="hint-panel">
-            <span>支持格式</span>
-            <strong>PDF / TXT / Markdown</strong>
-            <small>建议优先使用文本型 PDF，扫描件可能无法直接提取文字。</small>
-          </div>
-        </header>
-
-        <section className="upload-panel">
-          <div className="upload-copy">
-            <h2>上传文档</h2>
-            <p>
-              文件会保存到 <code>data/uploads</code>，初始状态为 <code>uploaded</code>。
-            </p>
-          </div>
-          <div className="upload-controls">
-            <label className="file-picker" htmlFor="upload-input">
-              <input
-                id="upload-input"
-                type="file"
-                accept=".pdf,.txt,.md,.markdown"
-                onChange={handleFileChange}
-                disabled={actionState.loading}
-              />
-              <span>{selectedFile ? selectedFile.name : "选择文件"}</span>
-            </label>
-            <button
-              className="primary-button"
-              type="button"
-              onClick={() => void handleUpload()}
-              disabled={actionState.loading}
-            >
-              {actionState.loading && actionState.type === "upload" ? "上传中..." : "上传文档"}
-            </button>
-          </div>
-        </section>
-
-        {error ? <div className="feedback error">{error}</div> : null}
-        {!error && message ? <div className="feedback success">{message}</div> : null}
-
-        <section className="table-panel">
-          <div className="table-header">
-            <h2>文档列表</h2>
-            <button className="ghost-button" type="button" onClick={() => void refreshDocuments()}>
-              刷新列表
-            </button>
-          </div>
-
-          {pageLoading ? (
-            <div className="empty-state">正在读取数据库中的文档记录...</div>
-          ) : documents.length === 0 ? (
-            <div className="empty-state">还没有文档，先上传一份检修资料试试。</div>
-          ) : (
-            <div className="table-wrap">
-              <table className="document-table">
-                <thead>
-                  <tr>
-                    <th>文件名</th>
-                    <th>类型</th>
-                    <th>上传时间</th>
-                    <th>状态</th>
-                    <th>操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {documents.map((item) => {
-                    const isBusy = actionState.loading && actionState.targetId === item.document_id;
-                    return (
-                      <tr key={item.document_id}>
-                        <td>
-                          <div className="file-cell">
-                            <strong>{item.filename}</strong>
-                            <small>{item.document_id}</small>
-                          </div>
-                        </td>
-                        <td>{item.file_type}</td>
-                        <td>{formatDate(item.upload_time)}</td>
-                        <td>
-                          <span className={`status-pill status-${item.status}`}>
-                            {statusLabelMap[item.status] ?? item.status}
-                          </span>
-                        </td>
-                        <td>
-                          <div className="table-actions">
-                            <button
-                              className="secondary-button"
-                              type="button"
-                              onClick={() => void handleParse(item.document_id)}
-                              disabled={actionState.loading}
-                            >
-                              {isBusy && actionState.type === "parse" ? "解析中..." : "解析"}
-                            </button>
-                            <button
-                              className="secondary-button"
-                              type="button"
-                              onClick={() => void handleChunk(item.document_id)}
-                              disabled={actionState.loading || item.status === "uploaded"}
-                            >
-                              {isBusy && actionState.type === "chunk" ? "切分中..." : "切分"}
-                            </button>
-                            <button
-                              className="secondary-button"
-                              type="button"
-                              onClick={() => void handleIndex(item.document_id)}
-                              disabled={
-                                actionState.loading ||
-                                item.status === "uploaded" ||
-                                item.status === "parsed"
-                              }
-                            >
-                              {isBusy && actionState.type === "index" ? "入库中..." : "入库"}
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
+    <div className="page-stack">
+      <section className="metric-grid">
+        <MetricCard label="文档总数" value={documents.length} hint="SQLite documents" />
+        <MetricCard label="已切分" value={chunkedCount} hint="可继续向量入库" />
+        <MetricCard label="已入库" value={indexedCount} hint="可参与 RAG 检索" />
       </section>
-    </main>
+
+      <section className="pro-card upload-card">
+        <div>
+          <p className="section-eyebrow">Knowledge Ingestion</p>
+          <h2>上传检修资料</h2>
+          <p>文件会保存到 <code>data/uploads</code>，初始状态为 <code>uploaded</code>。</p>
+        </div>
+        <div className="upload-controls">
+          <label className="file-picker" htmlFor="upload-input">
+            <input
+              id="upload-input"
+              type="file"
+              accept=".pdf,.txt,.md,.markdown"
+              onChange={handleFileChange}
+              disabled={actionState.loading}
+            />
+            <span>{selectedFile ? selectedFile.name : "选择 PDF / TXT / Markdown"}</span>
+          </label>
+          <button
+            className="primary-button"
+            type="button"
+            onClick={() => void handleUpload()}
+            disabled={actionState.loading}
+          >
+            {actionState.loading && actionState.type === "upload" ? "上传中..." : "上传文档"}
+          </button>
+        </div>
+      </section>
+
+      {error ? <div className="feedback error">{error}</div> : null}
+      {!error && message ? <div className="feedback success">{message}</div> : null}
+
+      <section className="pro-card">
+        <div className="card-header">
+          <div>
+            <p className="section-eyebrow">Document Pipeline</p>
+            <h2>文档处理状态</h2>
+          </div>
+          <button className="ghost-button" type="button" onClick={() => void refreshDocuments()}>
+            刷新列表
+          </button>
+        </div>
+
+        {pageLoading ? (
+          <div className="empty-state">正在读取数据库中的文档记录...</div>
+        ) : documents.length === 0 ? (
+          <div className="empty-state">还没有文档，先上传一份检修资料试试。</div>
+        ) : (
+          <div className="table-wrap">
+            <table className="document-table">
+              <thead>
+                <tr>
+                  <th>文件名</th>
+                  <th>类型</th>
+                  <th>上传时间</th>
+                  <th>状态</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {documents.map((item) => {
+                  const isBusy = actionState.loading && actionState.targetId === item.document_id;
+                  return (
+                    <tr key={item.document_id}>
+                      <td>
+                        <div className="file-cell">
+                          <strong>{item.filename}</strong>
+                          <small>{item.document_id}</small>
+                        </div>
+                      </td>
+                      <td>{item.file_type}</td>
+                      <td>{formatDate(item.upload_time)}</td>
+                      <td>
+                        <span className={`status-pill status-${item.status}`}>
+                          {statusLabelMap[item.status] ?? item.status}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="table-actions">
+                          <button
+                            className="secondary-button"
+                            type="button"
+                            onClick={() => void handleParse(item.document_id)}
+                            disabled={actionState.loading}
+                          >
+                            {isBusy && actionState.type === "parse" ? "解析中..." : "解析"}
+                          </button>
+                          <button
+                            className="secondary-button"
+                            type="button"
+                            onClick={() => void handleChunk(item.document_id)}
+                            disabled={actionState.loading || item.status === "uploaded"}
+                          >
+                            {isBusy && actionState.type === "chunk" ? "切分中..." : "切分"}
+                          </button>
+                          <button
+                            className="secondary-button"
+                            type="button"
+                            onClick={() => void handleIndex(item.document_id)}
+                            disabled={
+                              actionState.loading ||
+                              item.status === "uploaded" ||
+                              item.status === "parsed"
+                            }
+                          >
+                            {isBusy && actionState.type === "index" ? "入库中..." : "入库"}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function MetricCard({ label, value, hint }: { label: string; value: number; hint: string }) {
+  return (
+    <article className="metric-card">
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <small>{hint}</small>
+    </article>
   );
 }
 
