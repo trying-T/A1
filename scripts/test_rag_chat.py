@@ -22,6 +22,7 @@ QUESTIONS = [
     "出现过温报警应该检查哪些部件？",
     "电源模块有焦味，应该如何处理？",
     "报警代码 E07 可能代表什么？",
+    "液压泵出口压力长期偏低，应该如何排查？",
 ]
 
 
@@ -42,14 +43,14 @@ def main() -> None:
         print(f"问题：{question}")
         print(f"故障理解：{response.fault_understanding}")
         print("可能原因：")
-        for item in response.possible_causes:
-            print(f"- {item}")
+        print_items(response.possible_causes)
         print("排查步骤：")
-        for item in response.repair_steps:
-            print(f"- {item}")
+        print_items(response.repair_steps)
         print("安全注意事项：")
-        for item in response.safety_notes:
-            print(f"- {item}")
+        print_items(response.safety_notes)
+        if response.answer:
+            print("原始回答：")
+            print(response.answer[:500])
         print("sources：")
         for source in response.sources:
             print(
@@ -63,6 +64,14 @@ def main() -> None:
     REPORT_PATH.write_text("\n".join(report_lines), encoding="utf-8")
     print("=" * 80)
     print(f"RAG 问答测试报告已生成：{REPORT_PATH}")
+
+
+def print_items(items: list[str]) -> None:
+    if not items:
+        print("- 无")
+        return
+    for item in items:
+        print(f"- {item}")
 
 
 def build_report_header(llm_info: dict[str, str]) -> list[str]:
@@ -92,25 +101,30 @@ def render_question_report(index: int, question: str, payload: dict[str, Any]) -
         "### Possible Causes",
         "",
     ]
-    lines.extend(f"- {item}" for item in payload["possible_causes"])
+    lines.extend(render_items(payload["possible_causes"]))
     lines.extend(["", "### Repair Steps", ""])
-    lines.extend(f"- {item}" for item in payload["repair_steps"])
+    lines.extend(render_items(payload["repair_steps"]))
     lines.extend(["", "### Safety Notes", ""])
-    lines.extend(f"- {item}" for item in payload["safety_notes"])
-    lines.extend(["", "### Sources", ""])
+    lines.extend(render_items(payload["safety_notes"]))
 
+    if payload.get("answer"):
+        lines.extend(["", "### Raw Answer", "", "```text", payload["answer"], "```"])
+
+    lines.extend(["", "### Sources", ""])
     for source in payload["sources"]:
-        lines.extend(
-            [
-                (
-                    f"- `{source.get('filename')}` | chunk_id=`{source['chunk_id']}` | "
-                    f"document_id=`{source['document_id']}` | score=`{source['score']:.4f}`"
-                )
-            ]
+        lines.append(
+            f"- `{source.get('filename')}` | chunk_id=`{source['chunk_id']}` | "
+            f"document_id=`{source['document_id']}` | score=`{source['score']:.4f}`"
         )
 
-    lines.extend(["", "```json", json.dumps(payload, ensure_ascii=False, indent=2), "```", ""])
+    lines.extend(["", "### Full Payload", "", "```json", json.dumps(payload, ensure_ascii=False, indent=2), "```", ""])
     return lines
+
+
+def render_items(items: list[str]) -> list[str]:
+    if not items:
+        return ["- 无"]
+    return [f"- {item}" for item in items]
 
 
 if __name__ == "__main__":

@@ -20,6 +20,7 @@ class SourceItem(BaseModel):
 
 
 class RepairChatResponse(BaseModel):
+    answer: str = ""
     fault_understanding: str
     possible_causes: list[str]
     repair_steps: list[str]
