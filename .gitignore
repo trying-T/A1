@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+backend/.deps/
+backend/.deps-user/
+
+# Node
+node_modules/
+dist/
+
+# Local tooling caches
+.logs/
+.npm-cache/
+.pip-cache/
+.tmp/
+
+# Local env
+.env
+
+# Data artifacts
+data/vector_db/chroma/
+data/sqlite/app.db
+data/parsed/documents/
+data/parsed/chunks/
+data/uploads/doc-*
+
+# Local reference artifacts
+初轮对话.md
+赛题要求.md.md
+摩托车发动机维修手册.pdf
+摩托车发动机维修手册.txt
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
