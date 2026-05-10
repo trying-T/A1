@@ -26,6 +26,18 @@ class ChromaStore:
         self._save_records(records)
         return len(chunks)
 
+    def delete_document(self, document_id: str) -> int:
+        records = self._load_records()
+        kept_records = [
+            record
+            for record in records
+            if record.get("metadata", {}).get("document_id", record.get("document_id")) != document_id
+        ]
+        deleted_count = len(records) - len(kept_records)
+        if deleted_count:
+            self._save_records(kept_records)
+        return deleted_count
+
     def search(self, query_embedding: list[float], top_k: int = 5) -> list[dict[str, Any]]:
         records = self._load_records()
         scored: list[dict[str, Any]] = []

@@ -43,7 +43,7 @@ class EmbeddingService:
             return [self._mock_embed_text(text) for text in texts]
         if self.provider in {"siliconflow", "openai_compatible"}:
             return self._embed_texts_openai_compatible(texts)
-        raise EmbeddingError(f"不支持的 embedding provider：{self.provider}")
+        raise EmbeddingError(f"Unsupported embedding provider ({self._provider_label()})")
 
     def provider_info(self) -> dict[str, str]:
         return {
@@ -54,11 +54,11 @@ class EmbeddingService:
 
     def _embed_texts_openai_compatible(self, texts: list[str]) -> list[list[float]]:
         if not self.base_url:
-            raise EmbeddingError("真实 embedding 需要配置 EMBEDDING_BASE_URL。")
+            raise EmbeddingError(f"Missing EMBEDDING_BASE_URL ({self._provider_label()})")
         if not self.api_key:
-            raise EmbeddingError("真实 embedding 需要配置 EMBEDDING_API_KEY。")
+            raise EmbeddingError(f"Missing EMBEDDING_API_KEY ({self._provider_label()})")
         if not self.model:
-            raise EmbeddingError("真实 embedding 需要配置 EMBEDDING_MODEL。")
+            raise EmbeddingError(f"Missing EMBEDDING_MODEL ({self._provider_label()})")
 
         endpoint = f"{self.base_url}/embeddings"
         payload = json.dumps({"model": self.model, "input": texts}).encode("utf-8")
@@ -77,19 +77,26 @@ class EmbeddingService:
                 response_payload = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="ignore")
-            raise EmbeddingError(f"embedding API 请求失败：HTTP {exc.code} {detail}") from exc
+            raise EmbeddingError(
+                f"Embedding API request failed ({self._provider_label()}): HTTP {exc.code} {detail}"
+            ) from exc
         except urllib.error.URLError as exc:
-            raise EmbeddingError(f"embedding API 连接失败：{exc.reason}") from exc
+            raise EmbeddingError(
+                f"Embedding API connection failed ({self._provider_label()}): {exc.reason}"
+            ) from exc
 
         data = response_payload.get("data")
         if not isinstance(data, list):
-            raise EmbeddingError("embedding API 返回格式缺少 data 数组。")
+            raise EmbeddingError(f"Embedding API response missing data array ({self._provider_label()})")
 
         ordered_data = sorted(data, key=lambda item: item.get("index", 0))
         embeddings = [item.get("embedding") for item in ordered_data]
         if len(embeddings) != len(texts) or any(not isinstance(item, list) for item in embeddings):
-            raise EmbeddingError("embedding API 返回的向量数量或格式不正确。")
+            raise EmbeddingError(f"Embedding API returned invalid vector count or format ({self._provider_label()})")
         return embeddings
+
+    def _provider_label(self) -> str:
+        return f"provider={self.provider}, model={self.model}"
 
     def _mock_embed_text(self, text: str) -> list[float]:
         vector = [0.0] * self.mock_dimension

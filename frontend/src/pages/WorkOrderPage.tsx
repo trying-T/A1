@@ -8,7 +8,11 @@ import type { WorkOrderItem } from "../types/workOrder";
 
 const { Text, Title, Paragraph } = Typography;
 
-export default function WorkOrderPage() {
+type WorkOrderPageProps = {
+  selectedWorkOrderId?: string | null;
+};
+
+export default function WorkOrderPage({ selectedWorkOrderId }: WorkOrderPageProps) {
   const [items, setItems] = useState<WorkOrderItem[]>([]);
   const [selected, setSelected] = useState<WorkOrderItem | null>(null);
   const [loading, setLoading] = useState(true);
@@ -17,7 +21,7 @@ export default function WorkOrderPage() {
 
   useEffect(() => {
     void refreshWorkOrders();
-  }, []);
+  }, [selectedWorkOrderId]);
 
   async function refreshWorkOrders() {
     setLoading(true);
@@ -25,8 +29,12 @@ export default function WorkOrderPage() {
     try {
       const result = await getWorkOrders();
       setItems(result.items);
-      if (!selected && result.items.length > 0) {
-        setSelected(result.items[0]);
+      const nextSelected =
+        result.items.find((item) => item.work_order_id === selectedWorkOrderId) ?? result.items[0] ?? null;
+      if (nextSelected) {
+        setSelected(nextSelected);
+      } else {
+        setSelected(null);
       }
     } catch (nextError) {
       setError(getErrorMessage(nextError));

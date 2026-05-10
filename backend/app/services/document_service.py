@@ -14,7 +14,7 @@ from app.schemas.document_schema import (
     DocumentProcessResponse,
 )
 from app.services.chunk_service import ChunkService
-from app.services.embedding_service import EmbeddingService
+from app.services.embedding_service import EmbeddingError, EmbeddingService
 from app.services.parser_service import ParseError, ParserService
 from app.vectorstore.chroma_store import ChromaStore
 
@@ -98,33 +98,52 @@ class DocumentService:
 
     def parse_document(self, document_id: str) -> DocumentProcessResponse:
         document = self._get_document_row(document_id)
+        self._clear_document_processing_data(document_id, clear_parsed_path=True)
         file_path = Path(document["file_path"])
         if not file_path.exists():
+            message = "未找到原始文件，无法执行解析。"
+            self._set_document_failed(document_id, message)
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="未找到原始文件，无法执行解析。",
+                detail=message,
             )
 
         try:
             parsed_text = self.parser_service.parse_file(file_path, document["file_type"])
         except ParseError as exc:
+            message = f"文档解析失败：{exc}"
+            self._set_document_failed(document_id, message)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"文档解析失败：{exc}",
+                detail=message,
+            ) from exc
+        except Exception as exc:
+            message = f"文档解析失败：{exc}"
+            self._set_document_failed(document_id, message)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=message,
             ) from exc
 
         parsed_path = self.parsed_root / f"{document_id}.txt"
-        parsed_path.write_text(parsed_text, encoding="utf-8")
-
-        with get_connection() as connection:
-            connection.execute(
-                """
-                UPDATE documents
-                SET status = ?, parsed_text_path = ?
-                WHERE document_id = ?
-                """,
-                ("parsed", str(parsed_path), document_id),
-            )
+        try:
+            parsed_path.write_text(parsed_text, encoding="utf-8")
+            with get_connection() as connection:
+                connection.execute(
+                    """
+                    UPDATE documents
+                    SET status = ?, parsed_text_path = ?, error_message = ?
+                    WHERE document_id = ?
+                    """,
+                    ("parsed", str(parsed_path), None, document_id),
+                )
+        except Exception as exc:
+            message = f"解析结果写入失败：{exc}"
+            self._set_document_failed(document_id, message)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=message,
+            ) from exc
 
         return DocumentProcessResponse(
             document_id=document_id,
@@ -135,57 +154,79 @@ class DocumentService:
 
     def chunk_document(self, document_id: str) -> DocumentProcessResponse:
         document = self._get_document_row(document_id)
+        self._clear_document_processing_data(document_id, clear_parsed_path=False)
         parsed_text_path = document["parsed_text_path"]
         if not parsed_text_path:
+            message = "文档尚未解析，请先执行解析。"
+            self._set_document_failed(document_id, message)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="文档尚未解析，请先执行解析。",
+                detail=message,
             )
 
         parsed_path = Path(parsed_text_path)
         if not parsed_path.exists():
+            message = "解析后的文本文件不存在，请重新执行解析。"
+            self._set_document_failed(document_id, message)
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="解析后的文本文件不存在，请重新执行解析。",
+                detail=message,
             )
 
-        chunks = self.chunk_service.split_text(parsed_path.read_text(encoding="utf-8"))
+        try:
+            chunks = self.chunk_service.split_text(parsed_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            message = f"文本切分失败：{exc}"
+            self._set_document_failed(document_id, message)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=message,
+            ) from exc
         if not chunks:
+            message = "文档内容为空，无法切分。"
+            self._set_document_failed(document_id, message)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="文档内容为空，无法切分。",
+                detail=message,
             )
 
-        with get_connection() as connection:
-            connection.execute("DELETE FROM chunks WHERE document_id = ?", (document_id,))
-            for chunk in chunks:
-                metadata = {
-                    "filename": document["filename"],
-                    "file_type": document["file_type"],
-                    "chunk_size": self.chunk_service.chunk_size,
-                    "overlap": self.chunk_service.overlap,
-                    "start_offset": chunk["start_offset"],
-                    "end_offset": chunk["end_offset"],
-                }
+        try:
+            with get_connection() as connection:
+                for chunk in chunks:
+                    metadata = {
+                        "filename": document["filename"],
+                        "file_type": document["file_type"],
+                        "chunk_size": self.chunk_service.chunk_size,
+                        "overlap": self.chunk_service.overlap,
+                        "start_offset": chunk["start_offset"],
+                        "end_offset": chunk["end_offset"],
+                    }
+                    connection.execute(
+                        """
+                        INSERT INTO chunks (
+                            chunk_id, document_id, chunk_text, chunk_index, metadata_json
+                        ) VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (
+                            f"chk-{uuid4().hex[:12]}",
+                            document_id,
+                            chunk["chunk_text"],
+                            chunk["chunk_index"],
+                            json.dumps(metadata, ensure_ascii=False),
+                        ),
+                    )
+
                 connection.execute(
-                    """
-                    INSERT INTO chunks (
-                        chunk_id, document_id, chunk_text, chunk_index, metadata_json
-                    ) VALUES (?, ?, ?, ?, ?)
-                    """,
-                    (
-                        f"chk-{uuid4().hex[:12]}",
-                        document_id,
-                        chunk["chunk_text"],
-                        chunk["chunk_index"],
-                        json.dumps(metadata, ensure_ascii=False),
-                    ),
+                    "UPDATE documents SET status = ?, error_message = ? WHERE document_id = ?",
+                    ("chunked", None, document_id),
                 )
-
-            connection.execute(
-                "UPDATE documents SET status = ? WHERE document_id = ?",
-                ("chunked", document_id),
-            )
+        except Exception as exc:
+            message = f"文本切分写入失败：{exc}"
+            self._set_document_failed(document_id, message)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=message,
+            ) from exc
 
         return DocumentProcessResponse(
             document_id=document_id,
@@ -196,6 +237,7 @@ class DocumentService:
 
     def index_document(self, document_id: str) -> DocumentProcessResponse:
         document = self._get_document_row(document_id)
+        self.vector_store.delete_document(document_id)
         with get_connection() as connection:
             rows = connection.execute(
                 """
@@ -208,13 +250,23 @@ class DocumentService:
             ).fetchall()
 
         if not rows:
+            message = "文档尚未切分，请先执行切分。"
+            self._set_document_failed(document_id, message)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="文档尚未切分，请先执行切分。",
+                detail=message,
             )
 
         chunk_texts = [row["chunk_text"] for row in rows]
-        embeddings = self.embedding_service.embed_texts(chunk_texts)
+        try:
+            embeddings = self.embedding_service.embed_texts(chunk_texts)
+        except EmbeddingError as exc:
+            message = f"文档向量入库失败：{exc}"
+            self._set_document_failed(document_id, message)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=message,
+            ) from exc
         records = []
         for row, embedding in zip(rows, embeddings):
             metadata = json.loads(row["metadata_json"])
@@ -238,11 +290,19 @@ class DocumentService:
                 }
             )
 
-        indexed_count = self.vector_store.add_chunks(records)
+        try:
+            indexed_count = self.vector_store.add_chunks(records)
+        except Exception as exc:
+            message = f"向量存储写入失败：{exc}"
+            self._set_document_failed(document_id, message)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=message,
+            ) from exc
         with get_connection() as connection:
             connection.execute(
-                "UPDATE documents SET status = ? WHERE document_id = ?",
-                ("indexed", document_id),
+                "UPDATE documents SET status = ?, error_message = ? WHERE document_id = ?",
+                ("indexed", None, document_id),
             )
 
         return DocumentProcessResponse(
@@ -279,3 +339,29 @@ class DocumentService:
             status=row["status"],
             upload_time=row["upload_time"],
         )
+
+    def _clear_document_processing_data(self, document_id: str, clear_parsed_path: bool) -> None:
+        self.vector_store.delete_document(document_id)
+        with get_connection() as connection:
+            connection.execute("DELETE FROM chunks WHERE document_id = ?", (document_id,))
+            if clear_parsed_path:
+                connection.execute(
+                    """
+                    UPDATE documents
+                    SET parsed_text_path = ?, error_message = ?
+                    WHERE document_id = ?
+                    """,
+                    (None, None, document_id),
+                )
+            else:
+                connection.execute(
+                    "UPDATE documents SET error_message = ? WHERE document_id = ?",
+                    (None, document_id),
+                )
+
+    def _set_document_failed(self, document_id: str, message: str) -> None:
+        with get_connection() as connection:
+            connection.execute(
+                "UPDATE documents SET status = ?, error_message = ? WHERE document_id = ?",
+                ("failed", message, document_id),
+            )

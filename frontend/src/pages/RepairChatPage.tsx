@@ -11,7 +11,11 @@ const { TextArea } = Input;
 
 const DEFAULT_QUESTION = "设备启动后电源指示灯不亮，风扇也不转，应该如何排查？";
 
-export default function RepairChatPage() {
+type RepairChatPageProps = {
+  onWorkOrderCreated?: (workOrderId: string) => void;
+};
+
+export default function RepairChatPage({ onWorkOrderCreated }: RepairChatPageProps) {
   const [form] = Form.useForm<{ question: string; equipment_type?: string }>();
   const [result, setResult] = useState<RepairChatResponse | null>(null);
   const [lastRequest, setLastRequest] = useState<{ question: string; equipment_type?: string | null } | null>(null);
@@ -59,6 +63,7 @@ export default function RepairChatPage() {
         operator_note: "",
       });
       message.success(`检修记录已生成：${workOrder.work_order_id}`);
+      onWorkOrderCreated?.(workOrder.work_order_id);
     } catch (nextError) {
       message.error(nextError instanceof Error ? nextError.message : "生成检修记录失败。");
     } finally {

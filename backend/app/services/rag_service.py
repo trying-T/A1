@@ -4,14 +4,17 @@ from typing import Any
 
 from app.config import BASE_DIR
 from app.schemas.chat_schema import RepairChatRequest, RepairChatResponse, SourceItem
+from app.services.embedding_service import EmbeddingError
 from app.services.llm_service import LLMError, LLMService
 from app.services.retrieval_service import RetrievalService
+from app.services.safety_service import SafetyService
 
 
 class RagService:
     def __init__(self) -> None:
         self.retrieval_service = RetrievalService()
         self.llm_service = LLMService()
+        self.safety_service = SafetyService()
         self.prompt_path = BASE_DIR / "backend" / "app" / "prompts" / "repair_qa_prompt.txt"
 
     def answer(self, payload: RepairChatRequest) -> RepairChatResponse:
@@ -27,7 +30,17 @@ class RagService:
         equipment_type: str | None = None,
         top_k: int = 5,
     ) -> RepairChatResponse:
-        retrieval_response = self.retrieval_service.search(query=question, top_k=top_k)
+        try:
+            retrieval_response = self.retrieval_service.search(query=question, top_k=top_k)
+        except EmbeddingError as exc:
+            parsed = self._fallback_answer(f"检索向量化失败：{exc}")
+            return self._build_response(
+                question=question,
+                parsed=parsed,
+                answer="",
+                sources=[],
+            )
+
         sources = [self._source_from_result(result) for result in retrieval_response.results]
         context = self._build_context(retrieval_response.results)
         messages = [
@@ -49,12 +62,37 @@ class RagService:
         except LLMError as exc:
             parsed = self._fallback_answer(f"模型调用失败：{exc}")
 
-        return RepairChatResponse(
+        return self._build_response(
+            question=question,
+            parsed=parsed,
             answer=self._ensure_text(parsed.get("answer"), default=raw_answer),
-            fault_understanding=self._ensure_text(parsed.get("fault_understanding")),
-            possible_causes=self._ensure_list(parsed.get("possible_causes")),
-            repair_steps=self._ensure_list(parsed.get("repair_steps")),
+            sources=sources,
+        )
+
+    def _build_response(
+        self,
+        question: str,
+        parsed: dict[str, Any],
+        answer: str,
+        sources: list[SourceItem],
+    ) -> RepairChatResponse:
+        fault_understanding = self._ensure_text(parsed.get("fault_understanding"))
+        possible_causes = self._ensure_list(parsed.get("possible_causes"))
+        repair_steps = self._ensure_list(parsed.get("repair_steps"))
+        safety_notes = self.safety_service.enhance_safety_notes(
+            question=question,
+            fault_understanding=fault_understanding,
+            possible_causes=possible_causes,
+            repair_steps=repair_steps,
             safety_notes=self._ensure_list(parsed.get("safety_notes")),
+            sources=sources,
+        )
+        return RepairChatResponse(
+            answer=answer,
+            fault_understanding=fault_understanding,
+            possible_causes=possible_causes,
+            repair_steps=repair_steps,
+            safety_notes=safety_notes,
             sources=sources,
         )
 

@@ -22,7 +22,8 @@ def init_db() -> None:
                 file_type TEXT NOT NULL,
                 status TEXT NOT NULL,
                 upload_time TEXT NOT NULL,
-                parsed_text_path TEXT
+                parsed_text_path TEXT,
+                error_message TEXT
             );
 
             CREATE TABLE IF NOT EXISTS chunks (
@@ -52,3 +53,9 @@ def init_db() -> None:
             );
             """
         )
+        columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(documents)").fetchall()
+        }
+        if "error_message" not in columns:
+            connection.execute("ALTER TABLE documents ADD COLUMN error_message TEXT")
