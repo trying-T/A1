@@ -36,5 +36,19 @@ def init_db() -> None:
 
             CREATE UNIQUE INDEX IF NOT EXISTS idx_chunks_document_index
             ON chunks(document_id, chunk_index);
+
+            CREATE TABLE IF NOT EXISTS workorders (
+                work_order_id TEXT PRIMARY KEY,
+                equipment_type TEXT,
+                fault_symptom TEXT NOT NULL,
+                fault_understanding TEXT NOT NULL,
+                possible_causes_json TEXT NOT NULL,
+                repair_steps_json TEXT NOT NULL,
+                safety_notes_json TEXT NOT NULL,
+                sources_json TEXT NOT NULL,
+                operator_note TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
             """
         )
