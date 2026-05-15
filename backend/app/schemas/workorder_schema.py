@@ -12,6 +12,7 @@ class WorkOrderCreateRequest(BaseModel):
     possible_causes: list[str] = Field(default_factory=list)
     repair_steps: list[str] = Field(default_factory=list)
     safety_notes: list[str] = Field(default_factory=list)
+    safety_actions: list[str] = Field(default_factory=list)
     sources: list[SourceItem] = Field(default_factory=list)
     operator_note: str = ""
 
@@ -34,6 +35,7 @@ class WorkOrderRawRow(BaseModel):
     possible_causes: list[str]
     repair_steps: list[str]
     safety_notes: list[str]
+    safety_actions: list[str]
     sources: list[dict[str, Any]]
     operator_note: str
     status: str

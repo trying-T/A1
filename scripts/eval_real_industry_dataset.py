@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 import urllib.error
 import urllib.request
 from datetime import datetime
@@ -8,11 +9,17 @@ from typing import Any
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
+BACKEND_DIR = ROOT_DIR / "backend"
 QUESTIONS_PATH = ROOT_DIR / "data" / "demo" / "real_industry_eval_questions.json"
 REPORT_PATH = ROOT_DIR / "data" / "demo" / "real_industry_eval_report.md"
 API_BASE_URL = os.getenv("EVAL_API_BASE_URL", "http://127.0.0.1:8000/api").rstrip("/")
 DEFAULT_TOP_K = int(os.getenv("EVAL_TOP_K", "5"))
 TOP_SOURCE_COUNT = 3
+
+sys.path.insert(0, str(BACKEND_DIR))
+
+from app.services.answer_validator import validate_required_keywords  # noqa: E402
+from app.services.term_preserver import TERM_ALIASES  # noqa: E402
 
 
 def main() -> None:
@@ -41,7 +48,7 @@ def main() -> None:
     report_lines.insert(5, f"- passed_count: `{passed_count}`")
     report_lines.insert(6, f"- failed_count: `{len(questions) - passed_count}`")
     report_lines.insert(7, f"- total_score: `{total_score}`")
-    report_lines.insert(8, f"- max_score: `{len(questions) * 5}`")
+    report_lines.insert(8, f"- max_score: `{len(questions) * 6}`")
 
     REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
     REPORT_PATH.write_text("\n".join(report_lines), encoding="utf-8")
@@ -58,7 +65,7 @@ def evaluate_question(item: dict[str, Any]) -> dict[str, Any]:
         "checks": {},
         "errors": [],
         "score": 0,
-        "max_score": 5,
+        "max_score": 6,
         "overall_passed": False,
     }
 
@@ -68,6 +75,10 @@ def evaluate_question(item: dict[str, Any]) -> dict[str, Any]:
             {
                 "question": item["question"],
                 "top_k": DEFAULT_TOP_K,
+                "required_keywords": item["expected_keywords"],
+                "question_type": item["test_type"],
+                "must_have_safety": item["must_have_safety"],
+                "should_create_workorder": item["should_create_workorder"],
             },
         )
         result["rag"] = rag_response
@@ -76,6 +87,7 @@ def evaluate_question(item: dict[str, Any]) -> dict[str, Any]:
             "document_hit": check_expected_documents(rag_response, item["expected_documents"]),
             "keyword_hit": check_expected_keywords(rag_response, item["expected_keywords"]),
             "safety_notes": check_safety_notes(rag_response, item["must_have_safety"]),
+            "safety_guard": check_safety_guard(rag_response, item),
             "source_fields": check_source_fields(rag_response),
             "workorder": check_workorder(item, rag_response),
         }
@@ -121,13 +133,15 @@ def check_expected_documents(payload: dict[str, Any], expected_documents: list[s
 
 
 def check_expected_keywords(payload: dict[str, Any], expected_keywords: list[str]) -> dict[str, Any]:
-    text = build_answer_text(payload)
-    missing = [keyword for keyword in expected_keywords if keyword.lower() not in text.lower()]
+    validation = validate_required_keywords(payload, expected_keywords, TERM_ALIASES)
+    missing = validation["missing_keywords"]
     return {
         "passed": not missing,
         "errors": [f"answer/structured fields missing expected keywords: {missing}"] if missing else [],
         "expected_keywords": expected_keywords,
         "missing_keywords": missing,
+        "matched_keywords": validation["matched_keywords"],
+        "checked_text_length": validation["checked_text_length"],
     }
 
 
@@ -146,6 +160,36 @@ def check_safety_notes(payload: dict[str, Any], must_have_safety: bool) -> dict[
         "errors": errors,
         "safety_notes": safety_notes if isinstance(safety_notes, list) else [],
     }
+
+
+def check_safety_guard(payload: dict[str, Any], item: dict[str, Any]) -> dict[str, Any]:
+    if not item["must_have_safety"]:
+        return {"passed": True, "errors": []}
+
+    errors = []
+    validation = payload.get("validation", {})
+    safety_guard = validation.get("safety_guard", {}) if isinstance(validation, dict) else {}
+    if validation.get("validation_passed") is not True:
+        errors.append("RAG validation_passed should be true for accepted safety answers")
+    if safety_guard.get("passed") is not True:
+        errors.append(f"Safety Guard validation failed: {safety_guard.get('errors', [])}")
+
+    for field in [
+        "operation_allowed",
+        "immediate_actions",
+        "prohibited_actions",
+        "required_personnel",
+        "risk_keywords",
+        "manual_basis",
+    ]:
+        value = payload.get(field)
+        if field == "operation_allowed":
+            if value not in ["不允许", "需要先满足条件", "资料不足无法确认"]:
+                errors.append("operation_allowed has invalid value")
+        elif not isinstance(value, list) or not any(str(item).strip() for item in value):
+            errors.append(f"{field} must be a non-empty list for safety questions")
+
+    return {"passed": not errors, "errors": errors, "safety_guard": safety_guard}
 
 
 def check_source_fields(payload: dict[str, Any]) -> dict[str, Any]:
@@ -194,6 +238,7 @@ def check_workorder(item: dict[str, Any], rag_response: dict[str, Any]) -> dict[
         "possible_causes": rag_response.get("possible_causes", []),
         "repair_steps": rag_response.get("repair_steps", []),
         "safety_notes": rag_response.get("safety_notes", []),
+        "safety_actions": rag_response.get("safety_actions", []),
         "sources": rag_response.get("sources", []),
         "operator_note": f"Generated by scripts/eval_real_industry_dataset.py for {item['id']}",
     }
@@ -229,6 +274,7 @@ def compare_workorder_detail(detail: dict[str, Any], expected: dict[str, Any]) -
         "possible_causes",
         "repair_steps",
         "safety_notes",
+        "safety_actions",
         "sources",
         "status",
         "created_at",
@@ -237,7 +283,15 @@ def compare_workorder_detail(detail: dict[str, Any], expected: dict[str, Any]) -
         if field not in detail:
             errors.append(f"WorkOrder detail missing `{field}`")
 
-    for field in ["fault_symptom", "fault_understanding", "possible_causes", "repair_steps", "safety_notes", "sources"]:
+    for field in [
+        "fault_symptom",
+        "fault_understanding",
+        "possible_causes",
+        "repair_steps",
+        "safety_notes",
+        "safety_actions",
+        "sources",
+    ]:
         if detail.get(field) != expected.get(field):
             errors.append(f"WorkOrder detail `{field}` does not match create payload")
 
@@ -249,19 +303,6 @@ def get_sources(payload: dict[str, Any]) -> list[dict[str, Any]]:
     if not isinstance(sources, list):
         return []
     return [source for source in sources if isinstance(source, dict)]
-
-
-def build_answer_text(payload: dict[str, Any]) -> str:
-    parts: list[str] = []
-    for field in ["answer", "fault_understanding"]:
-        value = payload.get(field)
-        if isinstance(value, str):
-            parts.append(value)
-    for field in ["possible_causes", "repair_steps", "safety_notes"]:
-        value = payload.get(field)
-        if isinstance(value, list):
-            parts.extend(str(item) for item in value)
-    return "\n".join(parts)
 
 
 def contains_safety_signal(safety_notes: list[Any]) -> bool:
@@ -377,7 +418,10 @@ def render_question_report(index: int, result: dict[str, Any]) -> list[str]:
     document_check = checks.get("document_hit", {})
     keyword_check = checks.get("keyword_hit", {})
     safety_check = checks.get("safety_notes", {})
+    safety_guard_check = checks.get("safety_guard", {})
     workorder_check = checks.get("workorder", {})
+    debug = rag.get("debug", {}) if isinstance(rag, dict) else {}
+    validation = rag.get("validation", {}) if isinstance(rag, dict) else {}
 
     lines = [
         f"## {index:02d}. {item['id']} [{item['test_type']}]",
@@ -424,6 +468,7 @@ def render_question_report(index: int, result: dict[str, Any]) -> list[str]:
             "",
             f"- 通过：`{safety_check.get('passed', False)}`",
             f"- safety_notes 数量：`{len(safety_check.get('safety_notes', []))}`",
+            f"- Safety Guard 通过：`{safety_guard_check.get('passed', False)}`",
             "",
             "### WorkOrder 检查",
             "",
@@ -431,6 +476,25 @@ def render_question_report(index: int, result: dict[str, Any]) -> list[str]:
             f"- 已创建：`{workorder_check.get('created', False)}`",
             f"- detail_loaded：`{workorder_check.get('detail_loaded', False)}`",
             f"- work_order_id：`{workorder_check.get('work_order_id', '')}`",
+            "",
+            "### 调试字段",
+            "",
+            "```json",
+            json.dumps(
+                {
+                    "required_terms": debug.get("required_terms", []),
+                    "answer_repair_applied": debug.get("answer_repair_applied", False),
+                    "answer_repair_terms": debug.get("answer_repair_terms", []),
+                    "answer_validator": debug.get("answer_validator", {}),
+                    "answer_validator_after_repair": debug.get("answer_validator_after_repair", {}),
+                    "safety_guard_assessment": debug.get("safety_guard_assessment", {}),
+                    "safety_guard_before_repair": debug.get("safety_guard_before_repair", {}),
+                    "validation": validation,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            "```",
         ]
     )
 

@@ -1,0 +1,37 @@
+{
+  "Emergency stop": {
+    "zh": "急停/紧急停止",
+    "aliases": ["emergency stop", "E-stop", "急停", "紧急停止"],
+    "must_preserve_original": true
+  },
+  "mode select switch": {
+    "zh": "模式选择开关",
+    "aliases": ["mode select", "mode select switch", "模式选择", "模式选择开关"],
+    "must_preserve_original": true
+  },
+  "deadman switch": {
+    "zh": "使能/死人开关",
+    "aliases": ["deadman", "deadman switch", "使能开关", "死人开关"],
+    "must_preserve_original": true
+  },
+  "teach pendant": {
+    "zh": "示教器",
+    "aliases": ["teach pendant", "示教器", "示教盒"],
+    "must_preserve_original": true
+  },
+  "safety fence": {
+    "zh": "安全栅/安全围栏",
+    "aliases": ["safety fence", "安全栅", "安全围栏"],
+    "must_preserve_original": true
+  },
+  "interlocked gate": {
+    "zh": "联锁门",
+    "aliases": ["interlocked gate", "interlock gate", "联锁门", "联锁安全门"],
+    "must_preserve_original": true
+  },
+  "interlocking": {
+    "zh": "联锁",
+    "aliases": ["interlocking", "interlock", "联锁"],
+    "must_preserve_original": true
+  }
+}

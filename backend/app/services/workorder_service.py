@@ -18,7 +18,7 @@ class WorkOrderService:
                 """
                 SELECT work_order_id, equipment_type, fault_symptom, fault_understanding,
                        possible_causes_json, repair_steps_json, safety_notes_json,
-                       sources_json, operator_note, status, created_at
+                       safety_actions_json, sources_json, operator_note, status, created_at
                 FROM workorders
                 ORDER BY created_at DESC
                 """
@@ -32,7 +32,7 @@ class WorkOrderService:
                 """
                 SELECT work_order_id, equipment_type, fault_symptom, fault_understanding,
                        possible_causes_json, repair_steps_json, safety_notes_json,
-                       sources_json, operator_note, status, created_at
+                       safety_actions_json, sources_json, operator_note, status, created_at
                 FROM workorders
                 WHERE work_order_id = ?
                 """,
@@ -54,8 +54,8 @@ class WorkOrderService:
                 INSERT INTO workorders (
                     work_order_id, equipment_type, fault_symptom, fault_understanding,
                     possible_causes_json, repair_steps_json, safety_notes_json,
-                    sources_json, operator_note, status, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    safety_actions_json, sources_json, operator_note, status, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     work_order_id,
@@ -65,6 +65,7 @@ class WorkOrderService:
                     json.dumps(payload.possible_causes, ensure_ascii=False),
                     json.dumps(payload.repair_steps, ensure_ascii=False),
                     json.dumps(payload.safety_notes, ensure_ascii=False),
+                    json.dumps(payload.safety_actions, ensure_ascii=False),
                     json.dumps(
                         [source.model_dump() for source in payload.sources],
                         ensure_ascii=False,
@@ -83,6 +84,7 @@ class WorkOrderService:
             possible_causes=payload.possible_causes,
             repair_steps=payload.repair_steps,
             safety_notes=payload.safety_notes,
+            safety_actions=payload.safety_actions,
             sources=payload.sources,
             operator_note=payload.operator_note,
             status=status_value,
@@ -103,6 +105,7 @@ class WorkOrderService:
             possible_causes=self._loads_json(row["possible_causes_json"], default=[]),
             repair_steps=self._loads_json(row["repair_steps_json"], default=[]),
             safety_notes=self._loads_json(row["safety_notes_json"], default=[]),
+            safety_actions=self._loads_json(row["safety_actions_json"], default=[]),
             sources=sources,
             operator_note=row["operator_note"],
             status=row["status"],

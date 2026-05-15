@@ -46,6 +46,7 @@ def init_db() -> None:
                 possible_causes_json TEXT NOT NULL,
                 repair_steps_json TEXT NOT NULL,
                 safety_notes_json TEXT NOT NULL,
+                safety_actions_json TEXT NOT NULL DEFAULT '[]',
                 sources_json TEXT NOT NULL,
                 operator_note TEXT NOT NULL,
                 status TEXT NOT NULL,
@@ -59,3 +60,9 @@ def init_db() -> None:
         }
         if "error_message" not in columns:
             connection.execute("ALTER TABLE documents ADD COLUMN error_message TEXT")
+        workorder_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(workorders)").fetchall()
+        }
+        if "safety_actions_json" not in workorder_columns:
+            connection.execute("ALTER TABLE workorders ADD COLUMN safety_actions_json TEXT NOT NULL DEFAULT '[]'")
