@@ -35,6 +35,7 @@ EMBEDDING_BASE_URL = os.getenv("EMBEDDING_BASE_URL", "").strip()
 EMBEDDING_API_KEY = os.getenv("EMBEDDING_API_KEY", "").strip()
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "mock-hash-embedding").strip()
 EMBEDDING_TIMEOUT_SECONDS = float(os.getenv("EMBEDDING_TIMEOUT_SECONDS", "30"))
+EMBEDDING_BATCH_SIZE = int(os.getenv("EMBEDDING_BATCH_SIZE", "64"))
 
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "").strip().lower()
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "").strip()

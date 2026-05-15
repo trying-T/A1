@@ -7,6 +7,7 @@ import urllib.request
 
 from app.config import (
     EMBEDDING_API_KEY,
+    EMBEDDING_BATCH_SIZE,
     EMBEDDING_BASE_URL,
     EMBEDDING_MODEL,
     EMBEDDING_PROVIDER,
@@ -26,6 +27,7 @@ class EmbeddingService:
         api_key: str = EMBEDDING_API_KEY,
         model: str = EMBEDDING_MODEL,
         timeout_seconds: float = EMBEDDING_TIMEOUT_SECONDS,
+        batch_size: int = EMBEDDING_BATCH_SIZE,
         mock_dimension: int = 256,
     ) -> None:
         self.provider = provider
@@ -33,6 +35,7 @@ class EmbeddingService:
         self.api_key = api_key
         self.model = "mock-hash-embedding" if provider == "mock" else model
         self.timeout_seconds = timeout_seconds
+        self.batch_size = max(1, batch_size)
         self.mock_dimension = mock_dimension
 
     def embed_text(self, text: str) -> list[float]:
@@ -60,6 +63,13 @@ class EmbeddingService:
         if not self.model:
             raise EmbeddingError(f"Missing EMBEDDING_MODEL ({self._provider_label()})")
 
+        embeddings: list[list[float]] = []
+        for start in range(0, len(texts), self.batch_size):
+            batch = texts[start : start + self.batch_size]
+            embeddings.extend(self._request_embedding_batch(batch))
+        return embeddings
+
+    def _request_embedding_batch(self, texts: list[str]) -> list[list[float]]:
         endpoint = f"{self.base_url}/embeddings"
         payload = json.dumps({"model": self.model, "input": texts}).encode("utf-8")
         request = urllib.request.Request(

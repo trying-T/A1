@@ -1,0 +1,218 @@
+[
+  {
+    "id": "smoke-001",
+    "question": "摩托车发动机火花塞应该如何检查和安装？请给出关键间隙和拧紧要求。",
+    "test_type": "smoke",
+    "expected_documents": ["摩托车发动机维修手册.pdf"],
+    "expected_keywords": ["火花塞", "0.7", "0.9", "20", "N·m"],
+    "must_have_safety": false,
+    "should_create_workorder": false
+  },
+  {
+    "id": "smoke-002",
+    "question": "AH3 机器人维护手册主要面向哪些维护内容？日常维护时应关注哪些安全提示？",
+    "test_type": "smoke",
+    "expected_documents": ["AH3 机器人维护手册 V1.1.5.pdf"],
+    "expected_keywords": ["AH3", "维护", "安全", "检查"],
+    "must_have_safety": true,
+    "should_create_workorder": false
+  },
+  {
+    "id": "smoke-003",
+    "question": "bfp-a3570l 安全手册中的剩余风险地图和剩余风险一览表是用来做什么的？",
+    "test_type": "smoke",
+    "expected_documents": ["bfp-a3570l.pdf"],
+    "expected_keywords": ["剩余风险", "保护措施", "危险", "警告"],
+    "must_have_safety": true,
+    "should_create_workorder": false
+  },
+  {
+    "id": "smoke-004",
+    "question": "FANUC educational cell 安全手册说明了哪些机器人安全使用注意事项？",
+    "test_type": "smoke",
+    "expected_documents": ["safety manual for fanuc educational cell.pdf"],
+    "expected_keywords": ["FANUC", "safety", "robot", "emergency"],
+    "must_have_safety": true,
+    "should_create_workorder": false
+  },
+  {
+    "id": "smoke-005",
+    "question": "CM2x-OM0230Q 气缸手册包含哪些主要章节？",
+    "test_type": "smoke",
+    "expected_documents": ["CM2x-OM0230Q.pdf"],
+    "expected_keywords": ["气缸", "产品规格", "设置方法", "保养点检"],
+    "must_have_safety": false,
+    "should_create_workorder": false
+  },
+  {
+    "id": "smoke-006",
+    "question": "CG1x-OM0006N 不锈钢气缸手册包含哪些维修保养和故障对策内容？",
+    "test_type": "smoke",
+    "expected_documents": ["CG1x-OM0006N.pdf"],
+    "expected_keywords": ["不锈钢气缸", "维修保养", "点检", "故障"],
+    "must_have_safety": false,
+    "should_create_workorder": false
+  },
+  {
+    "id": "param-001",
+    "question": "摩托车发动机火花塞间隙标准值是多少？安装火花塞的拧紧力矩是多少？",
+    "test_type": "parameter",
+    "expected_documents": ["摩托车发动机维修手册.pdf"],
+    "expected_keywords": ["0.7", "0.9", "20", "N·m"],
+    "must_have_safety": false,
+    "should_create_workorder": false
+  },
+  {
+    "id": "param-002",
+    "question": "摩托车发动机测量压缩压力时，标准压缩压力范围是多少？",
+    "test_type": "parameter",
+    "expected_documents": ["摩托车发动机维修手册.pdf"],
+    "expected_keywords": ["1300", "1900", "500", "900", "kPa"],
+    "must_have_safety": true,
+    "should_create_workorder": false
+  },
+  {
+    "id": "param-003",
+    "question": "CM2 系列气缸使用前需要确认哪些空气源和速度控制相关条件？",
+    "test_type": "parameter",
+    "expected_documents": ["CM2x-OM0230Q.pdf"],
+    "expected_keywords": ["使用空气", "速度控制", "气缸", "调整"],
+    "must_have_safety": false,
+    "should_create_workorder": false
+  },
+  {
+    "id": "param-004",
+    "question": "CG1 系列不锈钢气缸磁性开关安装时，安装螺钉的紧固力矩要求是什么？",
+    "test_type": "parameter",
+    "expected_documents": ["CG1x-OM0006N.pdf"],
+    "expected_keywords": ["磁性开关", "M4", "1", "1.2", "N"],
+    "must_have_safety": false,
+    "should_create_workorder": false
+  },
+  {
+    "id": "param-005",
+    "question": "FANUC 机器人控制器相关安全功能中，Emergency stop、mode select switch、deadman switch 分别属于哪些安全控制主题？",
+    "test_type": "parameter",
+    "expected_documents": ["safety manual for fanuc educational cell.pdf"],
+    "expected_keywords": ["Emergency stop", "mode select", "deadman", "teach pendant"],
+    "must_have_safety": true,
+    "should_create_workorder": false
+  },
+  {
+    "id": "param-006",
+    "question": "AH3 机器人维护资料中版本号、发布日期和适用对象信息是什么？",
+    "test_type": "parameter",
+    "expected_documents": ["AH3 机器人维护手册 V1.1.5.pdf"],
+    "expected_keywords": ["V1.1.5", "2023-05-15", "维护保养工程师", "机械工程师"],
+    "must_have_safety": false,
+    "should_create_workorder": false
+  },
+  {
+    "id": "fault-001",
+    "question": "摩托车发动机压缩压力低于标准下限时，应该如何判断是活塞环、气缸还是气门相关问题？",
+    "test_type": "procedure_fault",
+    "expected_documents": ["摩托车发动机维修手册.pdf"],
+    "expected_keywords": ["压缩压力", "机油", "活塞", "气门", "气缸"],
+    "must_have_safety": true,
+    "should_create_workorder": true
+  },
+  {
+    "id": "fault-002",
+    "question": "摩托车起动电机无法正常带动发动机转动时，应按哪些部件和步骤排查？",
+    "test_type": "procedure_fault",
+    "expected_documents": ["摩托车发动机维修手册.pdf"],
+    "expected_keywords": ["起动电机", "拆卸", "安装", "检查"],
+    "must_have_safety": true,
+    "should_create_workorder": true
+  },
+  {
+    "id": "fault-003",
+    "question": "CG1 不锈钢气缸动作不顺畅、速度变化或行程异常时，应做哪些点检？",
+    "test_type": "procedure_fault",
+    "expected_documents": ["CG1x-OM0006N.pdf"],
+    "expected_keywords": ["点检", "作动", "速度", "行程", "安装螺钉"],
+    "must_have_safety": true,
+    "should_create_workorder": true
+  },
+  {
+    "id": "fault-004",
+    "question": "CM2 气缸活塞杆密封圈需要更换时，应关注哪些保养点检和消耗品信息？",
+    "test_type": "procedure_fault",
+    "expected_documents": ["CM2x-OM0230Q.pdf"],
+    "expected_keywords": ["活塞杆", "密封圈", "保养点检", "消耗品"],
+    "must_have_safety": true,
+    "should_create_workorder": true
+  },
+  {
+    "id": "fault-005",
+    "question": "AH3 机器人进行维护保养前，维护人员应如何根据手册执行日常维护和安全检查？",
+    "test_type": "procedure_fault",
+    "expected_documents": ["AH3 机器人维护手册 V1.1.5.pdf"],
+    "expected_keywords": ["维护保养", "安全检查", "电气", "机械"],
+    "must_have_safety": true,
+    "should_create_workorder": true
+  },
+  {
+    "id": "fault-006",
+    "question": "FANUC 机器人进入安全栅内进行 teaching、adjustment 或 maintenance 前，应遵循哪些步骤和限制？",
+    "test_type": "procedure_fault",
+    "expected_documents": ["safety manual for fanuc educational cell.pdf"],
+    "expected_keywords": ["safety fence", "teaching", "maintenance", "trained", "teach pendant"],
+    "must_have_safety": true,
+    "should_create_workorder": true
+  },
+  {
+    "id": "safety-001",
+    "question": "机器人控制器或电气柜疑似冒烟时，能否继续上电测试？应先采取哪些安全措施？",
+    "test_type": "safety_boundary",
+    "expected_documents": ["bfp-a3570l.pdf", "safety manual for fanuc educational cell.pdf"],
+    "expected_keywords": ["电源", "停止", "安全", "危险"],
+    "must_have_safety": true,
+    "should_create_workorder": true
+  },
+  {
+    "id": "safety-002",
+    "question": "气缸所在机械设备还未切断气源和电源时，是否可以拆卸气缸或更换密封圈？",
+    "test_type": "safety_boundary",
+    "expected_documents": ["CG1x-OM0006N.pdf", "CM2x-OM0230Q.pdf"],
+    "expected_keywords": ["切断", "能量源", "电源", "拆卸", "安全"],
+    "must_have_safety": true,
+    "should_create_workorder": true
+  },
+  {
+    "id": "safety-003",
+    "question": "机器人自动运行区域的 safety fence 或 interlocked gate 失效时，是否可以继续生产？",
+    "test_type": "safety_boundary",
+    "expected_documents": ["safety manual for fanuc educational cell.pdf"],
+    "expected_keywords": ["safety fence", "interlocked gate", "interlocking", "stop", "safety"],
+    "must_have_safety": true,
+    "should_create_workorder": true
+  },
+  {
+    "id": "safety-004",
+    "question": "搬运三菱工业机器人本体或控制器时，手册要求如何处理起吊、叉车和固定装置相关风险？",
+    "test_type": "safety_boundary",
+    "expected_documents": ["bfp-a3570l.pdf"],
+    "expected_keywords": ["搬运", "起吊", "叉车", "固定", "风险"],
+    "must_have_safety": true,
+    "should_create_workorder": true
+  },
+  {
+    "id": "safety-005",
+    "question": "摩托车发动机测压或拆卸火花塞前，为什么要避免灰尘进入火花塞孔并处理燃油喷射器风险？",
+    "test_type": "safety_boundary",
+    "expected_documents": ["摩托车发动机维修手册.pdf"],
+    "expected_keywords": ["火花塞孔", "灰尘", "燃油喷射器", "压缩压力"],
+    "must_have_safety": true,
+    "should_create_workorder": true
+  },
+  {
+    "id": "safety-006",
+    "question": "AH3 机器人维护操作中，如果人员不具备电气或机械维护经验，是否应继续拆机维护？",
+    "test_type": "safety_boundary",
+    "expected_documents": ["AH3 机器人维护手册 V1.1.5.pdf"],
+    "expected_keywords": ["维护", "电气工程师", "机械工程师", "安全", "人员"],
+    "must_have_safety": true,
+    "should_create_workorder": true
+  }
+]
