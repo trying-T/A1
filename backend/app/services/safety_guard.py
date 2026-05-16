@@ -430,6 +430,7 @@ class SafetyGuard:
         reasons: list[str] = []
         high_risk_terms = self._matched_terms(question, HIGH_RISK_QUESTION_TERMS)
         level1_terms = self._matched_terms(question, LEVEL1_QUESTION_TERMS)
+        document_lookup_intent = self._has_document_lookup_intent(question)
 
         if question_type in {"safety_boundary", "high_risk_safety"}:
             reasons.append(f"question_type_{question_type}")
@@ -445,6 +446,8 @@ class SafetyGuard:
             return 1, self._dedupe(reasons)
 
         if question_type in {"smoke", "parameter"}:
+            if document_lookup_intent:
+                return 0, ["document_lookup_intent"]
             if high_risk_terms and self._has_immediate_risk_intent(question):
                 reasons.extend([f"question_type_{question_type}", "immediate_high_risk_intent"])
                 return 2, self._dedupe(reasons)
@@ -457,6 +460,8 @@ class SafetyGuard:
                 return 1, self._dedupe(reasons)
             return 0, []
 
+        if document_lookup_intent:
+            return 0, ["document_lookup_intent"]
         if high_risk_terms and self._has_immediate_risk_intent(question):
             reasons.append("immediate_high_risk_intent")
             return 2, self._dedupe(reasons)
@@ -492,6 +497,23 @@ class SafetyGuard:
             "hazard",
         ]
         return bool(self._matched_terms(question, terms))
+
+    def _has_document_lookup_intent(self, question: str) -> bool:
+        return any(
+            phrase in question
+            for phrase in [
+                "手册包含哪些",
+                "包含哪些维修保养",
+                "包含哪些故障对策",
+                "哪些维修保养和故障对策内容",
+                "位于哪类",
+                "哪类维护内容",
+                "属于哪一章",
+                "在哪个章节",
+                "目录",
+                "版本历史",
+            ]
+        )
 
     def _matched_terms(self, text: str, terms: list[str]) -> list[str]:
         normalized = normalize_text(text)

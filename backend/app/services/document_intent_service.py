@@ -12,8 +12,36 @@ class DocumentIntentService:
     RULES = [
         {
             "document": "safety manual for fanuc educational cell.pdf",
-            "entities": ["FANUC", "educational cell", "teach pendant", "safety fence"],
-            "aliases": ["fanuc", "educational cell", "teach pendant", "safety fence"],
+            "entities": [
+                "FANUC",
+                "educational cell",
+                "teach pendant",
+                "safety fence",
+                "防护门",
+                "围栏",
+                "示教定位",
+                "示教器",
+                "程序员",
+                "围栏内",
+                "控制器安全功能",
+                "模式选择",
+                "使能开关",
+            ],
+            "aliases": [
+                "fanuc",
+                "educational cell",
+                "teach pendant",
+                "safety fence",
+                "防护门",
+                "围栏",
+                "示教定位",
+                "示教器",
+                "程序员",
+                "围栏内",
+                "控制器安全功能",
+                "模式选择",
+                "使能开关",
+            ],
         },
         {
             "document": "bfp-a3570l.pdf",
@@ -43,6 +71,7 @@ class DocumentIntentService:
     ]
 
     BOOST = 0.18
+    STRONG_BRAND_BOOST = 0.42
 
     def infer(self, question: str) -> dict[str, Any]:
         normalized = normalize_text(question)
@@ -103,8 +132,11 @@ class DocumentIntentService:
 
     def _boosted_score(self, result: Any, preferred_documents: list[str]) -> float:
         score = float(getattr(result, "score", 0.0) or 0.0)
-        if self._filename(result) in preferred_documents:
+        filename = self._filename(result)
+        if filename in preferred_documents:
             score += self.BOOST
+        if filename == "safety manual for fanuc educational cell.pdf" and filename in preferred_documents:
+            score += self.STRONG_BRAND_BOOST
         return score
 
     def _filename(self, result: Any) -> str:

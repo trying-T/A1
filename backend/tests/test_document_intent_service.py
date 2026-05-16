@@ -37,6 +37,23 @@ class DocumentIntentServiceTest(unittest.TestCase):
         self.assertIn("CM2x-OM0230Q.pdf", cm2["preferred_documents"])
         self.assertIn("CG1x-OM0006N.pdf", cg1["preferred_documents"])
 
+    def test_fanuc_chinese_synonyms_boost_fanuc_document(self) -> None:
+        service = DocumentIntentService()
+        bfp = SimpleNamespace(score=0.72, metadata={"filename": "bfp-a3570l.pdf"}, document_title="bfp-a3570l.pdf")
+        fanuc = SimpleNamespace(
+            score=0.45,
+            metadata={"filename": "safety manual for fanuc educational cell.pdf"},
+            document_title="safety manual for fanuc educational cell.pdf",
+        )
+
+        results, debug = service.rerank(
+            "FANUC 机器人防护门被旁路后，是否可以让程序员进入围栏内做示教定位？",
+            [bfp, fanuc],
+        )
+
+        self.assertEqual(results[0], fanuc)
+        self.assertIn("safety manual for fanuc educational cell.pdf", debug["preferred_documents"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -73,10 +73,16 @@ class RagService:
                 sources=[],
             )
 
+        retrieval_results = self._expand_document_intent_candidates(
+            question=question,
+            results=retrieval_response.results,
+            top_k=top_k,
+        )
         reranked_results, document_intent_debug = self.document_intent_service.rerank(
             question,
-            retrieval_response.results,
+            retrieval_results,
         )
+        reranked_results = reranked_results[:top_k]
         sources = [self._source_from_result(result) for result in reranked_results]
         context = self._build_context(reranked_results)
         matched_industrial_terms = self.industrial_term_service.match_terms(question=question, context=context)
@@ -125,6 +131,22 @@ class RagService:
             "rerank_applied": False,
             "rerank_reason": "retrieval_not_available",
         }
+
+    def _expand_document_intent_candidates(self, question: str, results: list[Any], top_k: int) -> list[Any]:
+        intent = self.document_intent_service.infer(question)
+        preferred_documents = intent.get("preferred_documents", [])
+        if not preferred_documents or self._has_preferred_document(results, preferred_documents):
+            return results
+
+        expanded_top_k = max(top_k, min(20, top_k * 4))
+        if expanded_top_k <= top_k:
+            return results
+        try:
+            expanded_response = self.retrieval_service.search(query=question, top_k=expanded_top_k)
+        except EmbeddingError:
+            return results
+
+        return self._dedupe_retrieval_results([*results, *expanded_response.results])
 
     def _build_response(
         self,
@@ -178,6 +200,12 @@ class RagService:
             question_type=question_type,
         )
         guarded_result = guarded_payload["result"]
+        basis_assessment = self._build_basis_assessment(
+            question=question,
+            result=guarded_result,
+            context=context,
+            sources=sources,
+        )
         work_order_recommendation = self._build_work_order_recommendation(
             question=question,
             question_type=question_type,
@@ -187,6 +215,7 @@ class RagService:
             should_create_workorder=should_create_workorder,
             safety_assessment=guarded_payload["assessment"],
             required_terms=required_terms,
+            basis_assessment=basis_assessment,
         )
         validation_before_repair = self._validate_answer(
             result=guarded_result,
@@ -195,6 +224,7 @@ class RagService:
             matched_industrial_terms=matched_industrial_terms,
             work_order_recommendation=work_order_recommendation,
             should_create_workorder=should_create_workorder,
+            basis_assessment=basis_assessment,
         )
         repaired_payload = self.answer_repair_service.repair(
             result=guarded_result,
@@ -219,6 +249,12 @@ class RagService:
         )
         repaired = final_guarded_payload["result"]
         self._ensure_matched_terms_preserved(repaired, matched_industrial_terms)
+        final_basis_assessment = self._build_basis_assessment(
+            question=question,
+            result=repaired,
+            context=context,
+            sources=sources,
+        )
         work_order_recommendation = self._build_work_order_recommendation(
             question=question,
             question_type=question_type,
@@ -228,6 +264,7 @@ class RagService:
             should_create_workorder=should_create_workorder,
             safety_assessment=final_guarded_payload["assessment"],
             required_terms=required_terms,
+            basis_assessment=final_basis_assessment,
         )
         validation_after_repair = self._validate_answer(
             result=repaired,
@@ -236,6 +273,7 @@ class RagService:
             matched_industrial_terms=matched_industrial_terms,
             work_order_recommendation=work_order_recommendation,
             should_create_workorder=should_create_workorder,
+            basis_assessment=final_basis_assessment,
         )
         work_order = self._maybe_create_work_order(
             recommendation=work_order_recommendation,
@@ -247,6 +285,10 @@ class RagService:
             "matched_industrial_terms": matched_industrial_terms,
             **(document_intent_debug or {}),
             "work_order_recommendation": work_order_recommendation,
+            "basis_status": final_basis_assessment["basis_status"],
+            "basis_reasons": final_basis_assessment["basis_reasons"],
+            "human_review_required": final_basis_assessment["human_review_required"],
+            "basis_assessment": final_basis_assessment,
             "safety_guard_assessment": final_guarded_payload["assessment"],
             "validation_before_repair": validation_before_repair,
             "validation_after_repair": validation_after_repair,
@@ -268,6 +310,9 @@ class RagService:
             sources=sources,
             work_order_recommendation=work_order_recommendation,
             work_order=work_order,
+            basis_status=final_basis_assessment["basis_status"],
+            basis_reasons=final_basis_assessment["basis_reasons"],
+            human_review_required=final_basis_assessment["human_review_required"],
             validation=validation_after_repair,
             debug=debug,
         )
@@ -303,6 +348,7 @@ class RagService:
         matched_industrial_terms: list[dict[str, Any]],
         work_order_recommendation: dict[str, Any],
         should_create_workorder: bool | None,
+        basis_assessment: dict[str, Any],
     ) -> dict[str, Any]:
         keyword_check = self._validate_required_terms(result=result, required_terms=required_terms)
         safety_check = self.safety_guard.validate(
@@ -348,7 +394,84 @@ class RagService:
             "is_safety_question": safety_assessment.get("is_safety_question", False),
             "risk_level": safety_assessment.get("risk_level", 0),
             "risk_reasons": safety_assessment.get("risk_reasons", []),
+            "basis_status": basis_assessment.get("basis_status", "sufficient"),
+            "basis_reasons": basis_assessment.get("basis_reasons", []),
+            "human_review_required": basis_assessment.get("human_review_required", False),
         }
+
+    def _build_basis_assessment(
+        self,
+        question: str,
+        result: dict[str, Any],
+        context: str,
+        sources: list[SourceItem],
+    ) -> dict[str, Any]:
+        reasons: list[str] = []
+        question_text = question.lower()
+        answer_text = self._collect_result_text(result).lower()
+        context_text = context.lower()
+
+        insufficient_markers = [
+            "资料不足",
+            "依据不足",
+            "无法确认",
+            "无法完整确认",
+            "不能确认",
+            "人工复核",
+            "转人工",
+            "未提供",
+            "未找到",
+            "知识库中未找到充分依据",
+            "not enough",
+            "insufficient",
+        ]
+        question_markers = [
+            ("unknown_fault_code", ["未知故障码", "未列出", "p9999", "e9999", "故障码"]),
+            ("unknown_terminal_diagram", ["cnusr11", "全部端子", "接线图", "线号"]),
+            ("third_party_substitute", ["第三方", "替代", "代替", "兼容性", "保证寿命"]),
+            ("missing_model_specific_data", ["某具体型号", "精确", "stopping distance", "当前负载"]),
+            ("missing_purchase_or_lifetime_data", ["采购清单", "寿命小时", "强酸", "保证的寿命"]),
+        ]
+        for reason, markers in question_markers:
+            if any(marker.lower() in question_text for marker in markers):
+                reasons.append(reason)
+
+        if reasons and any(marker.lower() in answer_text for marker in insufficient_markers):
+            reasons.append("answer_indicates_insufficient_basis")
+
+        if not sources:
+            reasons.append("no_retrieval_sources")
+        if "知识库中未找到相关片段" in context_text:
+            reasons.append("empty_retrieval_context")
+
+        reasons = self._dedupe_strings(reasons)
+        if reasons:
+            basis_status = "insufficient"
+        elif self._ensure_text(result.get("manual_basis"), default="") or sources:
+            basis_status = "sufficient"
+        else:
+            basis_status = "partial"
+        return {
+            "basis_status": basis_status,
+            "basis_reasons": reasons,
+            "human_review_required": basis_status == "insufficient",
+        }
+
+    def _collect_result_text(self, result: dict[str, Any]) -> str:
+        chunks: list[str] = []
+
+        def visit(value: Any) -> None:
+            if isinstance(value, str):
+                chunks.append(value)
+            elif isinstance(value, list):
+                for item in value:
+                    visit(item)
+            elif isinstance(value, dict):
+                for item in value.values():
+                    visit(item)
+
+        visit(result)
+        return "\n".join(chunks)
 
     def _ensure_matched_terms_preserved(
         self,
@@ -407,9 +530,11 @@ class RagService:
         should_create_workorder: bool | None,
         safety_assessment: dict[str, Any],
         required_terms: list[str],
+        basis_assessment: dict[str, Any],
     ) -> dict[str, Any]:
         reasons = []
         explicit_execution_intent = self._has_explicit_workorder_intent(question)
+        document_lookup_intent = self._has_document_lookup_intent(question)
         normalized_question_type = (question_type or "").strip().lower()
         is_direct_workorder_type = normalized_question_type in {
             "procedure_fault",
@@ -417,18 +542,23 @@ class RagService:
             "high_risk_safety",
         }
         high_risk_safety = int(safety_assessment.get("risk_level", 0) or 0) >= 2
-        if should_create_workorder:
+        if should_create_workorder and not document_lookup_intent:
             reasons.append("request_should_create_workorder")
-        if is_direct_workorder_type:
+        if is_direct_workorder_type and not document_lookup_intent:
             reasons.append(f"question_type_{normalized_question_type}")
-        if explicit_execution_intent:
+        if explicit_execution_intent and not document_lookup_intent:
             reasons.append("explicit_execution_intent")
         if (
             normalized_question_type not in {"smoke", "parameter"}
             and high_risk_safety
+            and not document_lookup_intent
         ):
             reasons.append("safety_or_risk_related")
-        if normalized_question_type not in {"smoke", "parameter"} and self._looks_like_workorder_question(question):
+        if (
+            normalized_question_type not in {"smoke", "parameter"}
+            and self._looks_like_workorder_question(question)
+            and not document_lookup_intent
+        ):
             reasons.append("fault_or_maintenance_intent")
 
         repair_steps = self._ensure_list(result.get("repair_steps"))
@@ -455,6 +585,10 @@ class RagService:
             "ready_to_create": False,
             "reason": ", ".join(reasons) if reasons else "no_workorder_intent_detected",
             "explicit_execution_intent": explicit_execution_intent,
+            "document_lookup_intent": document_lookup_intent,
+            "basis_status": basis_assessment.get("basis_status", "sufficient"),
+            "basis_reasons": basis_assessment.get("basis_reasons", []),
+            "human_review_required": basis_assessment.get("human_review_required", False),
             "payload_preview": payload_preview,
         }
         quality_check = self._work_order_quality_check(
@@ -513,6 +647,7 @@ class RagService:
                 "ready_to_create": False,
                 "recommend_workorder": bool(recommendation.get("recommend_workorder")),
                 "missing_fields": ["payload_preview"],
+                "human_review_required": bool(recommendation.get("human_review_required")),
             }
         if question_type is None and isinstance(recommendation.get("work_order_quality_check"), dict):
             return recommendation["work_order_quality_check"]
@@ -523,10 +658,15 @@ class RagService:
         inspection_steps = self._ensure_list(payload.get("inspection_steps"))
         safety_actions = self._ensure_list(payload.get("safety_actions"))
         source_chunk_ids = self._ensure_list(payload.get("source_chunk_ids"))
+        basis_status = str(recommendation.get("basis_status") or "sufficient")
 
         if not recommend_workorder:
             ready_to_create = False
         else:
+            if recommendation.get("document_lookup_intent"):
+                missing_fields.append("actionable_workorder_intent")
+            if basis_status == "insufficient":
+                missing_fields.append("sufficient_manual_basis")
             if not self._ensure_text(payload.get("fault_symptom"), default=""):
                 missing_fields.append("fault_symptom")
             if not source_chunk_ids:
@@ -556,6 +696,9 @@ class RagService:
             "ready_to_create": ready_to_create,
             "recommend_workorder": recommend_workorder,
             "missing_fields": missing_fields,
+            "basis_status": basis_status,
+            "human_review_required": bool(recommendation.get("human_review_required"))
+            or basis_status == "insufficient",
         }
 
     def _maybe_create_work_order(
@@ -649,6 +792,30 @@ class RagService:
         normalized = question.lower()
         return any(keyword.lower() in normalized for keyword in keywords)
 
+    def _has_document_lookup_intent(self, question: str) -> bool:
+        keywords = [
+            "位于哪类",
+            "属于哪一章",
+            "在哪个章节",
+            "位于哪个章节",
+            "手册包含哪些内容",
+            "包含哪些主要章节",
+            "介绍哪些内容",
+            "资料定位",
+            "目录",
+            "位于哪一类",
+            "哪类维护内容",
+            "有哪些章节",
+            "版本历史",
+            "主要增加了哪些章节",
+            "手册包含哪些",
+            "包含哪些维修保养",
+            "包含哪些故障对策",
+            "哪些维修保养和故障对策内容",
+        ]
+        normalized = question.lower()
+        return any(keyword.lower() in normalized for keyword in keywords)
+
     def _extract_key_parameters(self, required_terms: list[str]) -> list[str]:
         parameters = []
         for term in required_terms:
@@ -656,6 +823,34 @@ class RagService:
             if text and (re.search(r"\d", text) or re.search(r"[a-zA-Z]+[·/.-]?[a-zA-Z]*", text)):
                 parameters.append(text)
         return parameters
+
+    def _dedupe_strings(self, values: list[str]) -> list[str]:
+        result: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            key = str(value).strip().lower()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            result.append(str(value).strip())
+        return result
+
+    def _has_preferred_document(self, results: list[Any], preferred_documents: list[str]) -> bool:
+        preferred = {str(document).strip() for document in preferred_documents if str(document).strip()}
+        return any(self.document_intent_service._filename(result) in preferred for result in results)
+
+    def _dedupe_retrieval_results(self, results: list[Any]) -> list[Any]:
+        deduped = []
+        seen: set[str] = set()
+        for result in results:
+            key = str(getattr(result, "chunk_id", "") or "")
+            if not key:
+                key = f"{self.document_intent_service._filename(result)}:{getattr(result, 'chunk_text', '')[:80]}"
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(result)
+        return deduped
 
     def _build_context(self, results: list[Any]) -> str:
         if not results:

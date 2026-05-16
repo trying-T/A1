@@ -1,0 +1,287 @@
+[
+  {
+    "id": "param-004",
+    "question": "CG1 系列不锈钢气缸磁性开关安装时，安装螺钉的紧固力矩要求是什么？",
+    "test_type": "parameter",
+    "expected_documents": [
+      "CG1x-OM0006N.pdf"
+    ],
+    "expected_keywords": [
+      "磁性开关",
+      "M4",
+      "1",
+      "1.2",
+      "N"
+    ],
+    "must_have_safety": false,
+    "should_create_workorder": false,
+    "type": "parameter",
+    "expected_doc": "CG1x-OM0006N.pdf",
+    "expected_risk_level": 0,
+    "expected_recommend_workorder": false,
+    "expected_ready_to_create": false,
+    "expected_insufficient_basis": false,
+    "notes": "原 24 题：CG1 磁性开关力矩参数查询。"
+  },
+  {
+    "id": "docintent-001",
+    "type": "document_intent",
+    "test_type": "smoke",
+    "question": "FANUC 教学单元资料里，操作面板和示教器上的 emergency stop 属于哪些安全使用主题？",
+    "expected_doc": "safety manual for fanuc educational cell.pdf",
+    "expected_documents": [
+      "safety manual for fanuc educational cell.pdf"
+    ],
+    "expected_keywords": [
+      "FANUC",
+      "emergency stop",
+      "teach pendant",
+      "operator"
+    ],
+    "expected_risk_level": 1,
+    "expected_recommend_workorder": false,
+    "expected_ready_to_create": false,
+    "must_have_safety": true,
+    "should_create_workorder": false,
+    "expected_insufficient_basis": false,
+    "notes": "文档意图：不写完整文件名，语义指向 FANUC educational cell safety manual。"
+  },
+  {
+    "id": "docintent-005",
+    "type": "document_intent",
+    "test_type": "smoke",
+    "question": "AH3 机器人资料里，上控制柜风扇的更换与维护位于哪类维护内容中？",
+    "expected_doc": "AH3 机器人维护手册 V1.1.5.pdf",
+    "expected_documents": [
+      "AH3 机器人维护手册 V1.1.5.pdf"
+    ],
+    "expected_keywords": [
+      "AH3",
+      "上控制柜风扇",
+      "更换与维护",
+      "电气零部件"
+    ],
+    "expected_risk_level": 0,
+    "expected_recommend_workorder": false,
+    "expected_ready_to_create": false,
+    "must_have_safety": false,
+    "should_create_workorder": false,
+    "expected_insufficient_basis": false,
+    "notes": "文档意图：AH3 + 上控制柜风扇。"
+  },
+  {
+    "id": "risk-syn-005",
+    "type": "high_risk_synonym",
+    "test_type": "safety_boundary",
+    "question": "FANUC 机器人防护门被旁路后，是否可以让程序员进入围栏内做示教定位？",
+    "expected_doc": "safety manual for fanuc educational cell.pdf",
+    "expected_documents": [
+      "safety manual for fanuc educational cell.pdf"
+    ],
+    "expected_keywords": [
+      "safety fence",
+      "teach pendant",
+      "trained",
+      "stop"
+    ],
+    "expected_risk_level": 2,
+    "expected_recommend_workorder": true,
+    "expected_ready_to_create": true,
+    "must_have_safety": true,
+    "should_create_workorder": true,
+    "expected_insufficient_basis": false,
+    "notes": "高风险同义表达：防护门旁路，避免直接使用旧触发词。"
+  },
+  {
+    "id": "safety-003",
+    "question": "机器人自动运行区域的 safety fence 或 interlocked gate 失效时，是否可以继续生产？",
+    "test_type": "safety_boundary",
+    "expected_documents": [
+      "safety manual for fanuc educational cell.pdf"
+    ],
+    "expected_keywords": [
+      "safety fence",
+      "interlocked gate",
+      "interlocking",
+      "stop",
+      "safety"
+    ],
+    "must_have_safety": true,
+    "should_create_workorder": true,
+    "type": "safety_boundary",
+    "expected_doc": "safety manual for fanuc educational cell.pdf",
+    "expected_risk_level": 2,
+    "expected_recommend_workorder": true,
+    "expected_ready_to_create": true,
+    "expected_insufficient_basis": false,
+    "notes": "原 24 题：safety fence/interlocked gate 失效边界。"
+  },
+  {
+    "id": "insufficient-003",
+    "type": "insufficient_basis",
+    "test_type": "procedure_fault",
+    "question": "AH3 控制系统出现未列出的错误代码 E9999 时，能否直接给出完整维修步骤？",
+    "expected_doc": "AH3 机器人维护手册 V1.1.5.pdf",
+    "expected_documents": [
+      "AH3 机器人维护手册 V1.1.5.pdf"
+    ],
+    "expected_keywords": [
+      "错误代码",
+      "资料不足",
+      "人工复核"
+    ],
+    "expected_risk_level": 2,
+    "expected_recommend_workorder": true,
+    "expected_ready_to_create": false,
+    "must_have_safety": true,
+    "should_create_workorder": true,
+    "expected_insufficient_basis": true,
+    "notes": "资料不足：手册指向错误代码手册，当前片段不足以完整维修。"
+  },
+  {
+    "id": "insufficient-004",
+    "type": "insufficient_basis",
+    "test_type": "parameter",
+    "question": "bfp 资料里能否直接给出机器人控制器 CNUSR11 全部端子的接线图和线号？",
+    "expected_doc": "bfp-a3570l.pdf",
+    "expected_documents": [
+      "bfp-a3570l.pdf"
+    ],
+    "expected_keywords": [
+      "CNUSR11",
+      "资料不足",
+      "人工复核"
+    ],
+    "expected_risk_level": 2,
+    "expected_recommend_workorder": false,
+    "expected_ready_to_create": false,
+    "must_have_safety": true,
+    "should_create_workorder": false,
+    "expected_insufficient_basis": true,
+    "notes": "资料不足：端子全量接线图不应凭空补齐。"
+  },
+  {
+    "id": "wo-boundary-001",
+    "type": "workorder_boundary",
+    "test_type": "smoke",
+    "question": "CM2 气缸手册包含产品规格、使用空气、速度控制和保养点检这些章节吗？",
+    "expected_doc": "CM2x-OM0230Q.pdf",
+    "expected_documents": [
+      "CM2x-OM0230Q.pdf"
+    ],
+    "expected_keywords": [
+      "产品规格",
+      "使用空气",
+      "速度控制",
+      "保养点检"
+    ],
+    "expected_risk_level": 1,
+    "expected_recommend_workorder": false,
+    "expected_ready_to_create": false,
+    "must_have_safety": false,
+    "should_create_workorder": false,
+    "expected_insufficient_basis": false,
+    "notes": "工单边界：手册内容概览，不应推荐工单。"
+  },
+  {
+    "id": "wo-boundary-002",
+    "type": "workorder_boundary",
+    "test_type": "procedure_fault",
+    "question": "CM2 气缸出现外部泄漏，怀疑活塞杆密封圈问题时应如何点检和处理？",
+    "expected_doc": "CM2x-OM0230Q.pdf",
+    "expected_documents": [
+      "CM2x-OM0230Q.pdf"
+    ],
+    "expected_keywords": [
+      "外部泄漏",
+      "活塞杆密封圈",
+      "更换",
+      "点检"
+    ],
+    "expected_risk_level": 2,
+    "expected_recommend_workorder": true,
+    "expected_ready_to_create": true,
+    "must_have_safety": true,
+    "should_create_workorder": true,
+    "expected_insufficient_basis": false,
+    "notes": "工单边界：实际故障处置，应推荐并 ready。",
+    "expected_risk_level_set": [
+      1,
+      2
+    ]
+  },
+  {
+    "id": "confuse-003",
+    "type": "similar_doc_confusion",
+    "test_type": "procedure_fault",
+    "question": "FANUC 单元内做 maintenance 时，进入围栏前应由谁操作 teach pendant，并如何避免外部启动？",
+    "expected_doc": "safety manual for fanuc educational cell.pdf",
+    "expected_documents": [
+      "safety manual for fanuc educational cell.pdf"
+    ],
+    "expected_keywords": [
+      "maintenance",
+      "teach pendant",
+      "safety fence",
+      "trained"
+    ],
+    "expected_risk_level": 2,
+    "expected_recommend_workorder": true,
+    "expected_ready_to_create": true,
+    "must_have_safety": true,
+    "should_create_workorder": true,
+    "expected_insufficient_basis": false,
+    "notes": "相似文档混淆：FANUC 安全围栏，不应优先 bfp。"
+  },
+  {
+    "id": "smoke-006",
+    "question": "CG1x-OM0006N 不锈钢气缸手册包含哪些维修保养和故障对策内容？",
+    "test_type": "smoke",
+    "expected_documents": [
+      "CG1x-OM0006N.pdf"
+    ],
+    "expected_keywords": [
+      "不锈钢气缸",
+      "维修保养",
+      "点检",
+      "故障"
+    ],
+    "must_have_safety": false,
+    "should_create_workorder": false,
+    "type": "smoke",
+    "expected_doc": "CG1x-OM0006N.pdf",
+    "expected_risk_level": 1,
+    "expected_recommend_workorder": false,
+    "expected_ready_to_create": false,
+    "expected_insufficient_basis": false,
+    "notes": "原 24 题：CG1 维修保养内容概览，当前规则会推荐工单。",
+    "expected_risk_level_set": [
+      0,
+      1
+    ]
+  },
+  {
+    "id": "fault-006",
+    "question": "FANUC 机器人进入安全栅内进行 teaching、adjustment 或 maintenance 前，应遵循哪些步骤和限制？",
+    "test_type": "procedure_fault",
+    "expected_documents": [
+      "safety manual for fanuc educational cell.pdf"
+    ],
+    "expected_keywords": [
+      "safety fence",
+      "teaching",
+      "maintenance",
+      "trained",
+      "teach pendant"
+    ],
+    "must_have_safety": true,
+    "should_create_workorder": true,
+    "type": "procedure_fault",
+    "expected_doc": "safety manual for fanuc educational cell.pdf",
+    "expected_risk_level": 2,
+    "expected_recommend_workorder": true,
+    "expected_ready_to_create": true,
+    "expected_insufficient_basis": false,
+    "notes": "原 24 题：FANUC safety fence 内 teaching/maintenance。"
+  }
+]

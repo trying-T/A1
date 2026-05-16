@@ -48,6 +48,33 @@ class StubWorkOrderService:
         return SimpleNamespace(work_order_id="wo-test-1")
 
 
+class StubDocumentIntentRetrievalService:
+    def __init__(self) -> None:
+        self.top_k_calls = []
+
+    def search(self, query: str, top_k: int):
+        self.top_k_calls.append(top_k)
+        bfp = SimpleNamespace(
+            chunk_id="bfp-1",
+            document_id="bfp",
+            document_title="bfp-a3570l.pdf",
+            metadata={"filename": "bfp-a3570l.pdf", "chunk_index": 1},
+            score=0.72,
+            chunk_text="Safety fence and maintenance content from another robot manual.",
+        )
+        if top_k <= 5:
+            return SimpleNamespace(results=[bfp])
+        fanuc = SimpleNamespace(
+            chunk_id="fanuc-1",
+            document_id="fanuc",
+            document_title="safety manual for fanuc educational cell.pdf",
+            metadata={"filename": "safety manual for fanuc educational cell.pdf", "chunk_index": 2},
+            score=0.71,
+            chunk_text="FANUC teach pendant and Emergency stop safety content.",
+        )
+        return SimpleNamespace(results=[bfp, fanuc])
+
+
 class RagServiceFlowTest(unittest.TestCase):
     def build_service(
         self,
@@ -282,6 +309,68 @@ class RagServiceFlowTest(unittest.TestCase):
         self.assertFalse(quality_check["ready_to_create"])
         self.assertIn("repair_steps_or_inspection_steps", missing_fields)
         self.assertIn("repair_steps_or_safety_actions", missing_fields)
+
+    def test_insufficient_basis_blocks_ready_to_create(self) -> None:
+        service = self.build_service(
+            [
+                '{"answer":"资料不足，应转人工复核。","fault_understanding":"未知错误代码 E9999",'
+                '"possible_causes":["资料不足"],"repair_steps":["人工复核"],"safety_notes":["安全"],'
+                '"safety_actions":["停止设备"]}'
+            ]
+        )
+
+        response = service.answer_repair(
+            "AH3 控制系统出现未列出的错误代码 E9999 时，能否直接给出完整维修步骤？",
+            question_type="procedure_fault",
+            should_create_workorder=True,
+        )
+
+        recommendation = response.work_order_recommendation
+        self.assertEqual(response.basis_status, "insufficient")
+        self.assertTrue(response.human_review_required)
+        self.assertTrue(recommendation["recommend_workorder"])
+        self.assertFalse(recommendation["ready_to_create"])
+        self.assertIn("sufficient_manual_basis", recommendation["payload_preview"]["missing_fields"])
+
+    def test_document_lookup_intent_does_not_recommend_workorder(self) -> None:
+        service = self.build_service(
+            [
+                '{"answer":"上控制柜风扇的更换与维护位于电气零部件维护内容中。",'
+                '"fault_understanding":"资料定位问题","possible_causes":[],'
+                '"repair_steps":["参考章节"],"safety_notes":["维护注意安全"],"safety_actions":["断电"]}'
+            ]
+        )
+
+        response = service.answer_repair(
+            "AH3 机器人资料里，上控制柜风扇的更换与维护位于哪类维护内容中？",
+            question_type="smoke",
+            should_create_workorder=False,
+        )
+
+        recommendation = response.work_order_recommendation
+        self.assertFalse(recommendation["recommend_workorder"])
+        self.assertFalse(recommendation["ready_to_create"])
+        self.assertTrue(recommendation["document_lookup_intent"])
+
+    def test_document_intent_expands_candidates_when_preferred_doc_missing(self) -> None:
+        service = self.build_service(
+            [
+                '{"answer":"FANUC teach pendant Emergency stop","fault_understanding":"classification",'
+                '"possible_causes":[],"repair_steps":[],"safety_notes":["safety"]}'
+            ]
+        )
+        service.retrieval_service = StubDocumentIntentRetrievalService()
+
+        response = service.answer_repair(
+            "FANUC teach pendant Emergency stop safety topic",
+            top_k=5,
+            question_type="smoke",
+            must_have_safety=True,
+        )
+
+        self.assertEqual(service.retrieval_service.top_k_calls, [5, 20])
+        self.assertEqual(response.sources[0].filename, "safety manual for fanuc educational cell.pdf")
+        self.assertIn("safety manual for fanuc educational cell.pdf", response.debug["preferred_documents"])
 
 
 if __name__ == "__main__":

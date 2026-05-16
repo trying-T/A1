@@ -40,5 +40,8 @@ class RepairChatResponse(BaseModel):
     sources: list[SourceItem]
     work_order_recommendation: dict[str, Any] = Field(default_factory=dict)
     work_order: dict[str, Any] = Field(default_factory=dict)
+    basis_status: str = "sufficient"
+    basis_reasons: list[str] = Field(default_factory=list)
+    human_review_required: bool = False
     validation: dict[str, Any] = Field(default_factory=dict)
     debug: dict[str, Any] = Field(default_factory=dict)

@@ -16,6 +16,7 @@ dist/
 .npm-cache/
 .pip-cache/
 .tmp/
+.tmp_uvicorn*.log
 
 # Local env
 .env
