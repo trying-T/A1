@@ -87,6 +87,56 @@ SAFETY_STRUCTURED_FIELDS = [
     "manual_basis",
 ]
 
+HIGH_RISK_QUESTION_TERMS = [
+    "冒烟",
+    "上电",
+    "拆卸",
+    "更换",
+    "气源",
+    "电源",
+    "能量源",
+    "安全栅",
+    "联锁门",
+    "急停",
+    "危险",
+    "禁止",
+    "停止",
+    "失效",
+    "无法",
+    "不能",
+    "是否可以",
+    "能否",
+    "继续",
+    "进入",
+    "safety fence",
+    "interlocked gate",
+    "emergency stop",
+    "maintenance",
+    "teaching",
+    "adjustment",
+    "danger",
+    "hazard",
+    "stop",
+]
+
+LEVEL1_QUESTION_TERMS = [
+    "维护",
+    "保养",
+    "点检",
+    "检查",
+    "确认",
+    "使用前",
+    "参数",
+    "条件",
+    "安全提示",
+    "注意事项",
+    "manual",
+    "safety",
+    "maintenance",
+    "check",
+    "inspection",
+]
+
 DEFAULT_OPERATION_ALLOWED = "需要先满足条件"
 INSUFFICIENT_OPERATION_ALLOWED = "资料不足无法确认"
 INSUFFICIENT_BASIS_TEXT = "当前资料片段未提供足够依据确认完整处置步骤，应转人工复核。"
@@ -101,11 +151,13 @@ class SafetyGuard:
         context: str,
         sources: list[Any],
         must_have_safety: bool | None,
+        question_type: str | None = None,
     ) -> dict[str, Any]:
         trigger_reasons: list[str] = []
         question_terms = self._matched_terms(question, SAFETY_TRIGGER_TERMS)
         english_terms = self._matched_terms(question, ENGLISH_SAFETY_TRIGGER_TERMS)
         source_terms = self._matched_source_terms(sources)
+        normalized_question_type = (question_type or "").strip().lower()
 
         if must_have_safety is True:
             trigger_reasons.append("must_have_safety")
@@ -120,9 +172,19 @@ class SafetyGuard:
         risk_keywords = self._dedupe([*question_terms, *english_terms])
         if not risk_keywords:
             risk_keywords = self._matched_terms(context, [*SAFETY_TRIGGER_TERMS, *ENGLISH_SAFETY_TRIGGER_TERMS])[:8]
+        risk_level, risk_reasons = self._classify_risk_level(
+            question=question,
+            question_type=normalized_question_type,
+            must_have_safety=must_have_safety,
+            question_terms=question_terms,
+            english_terms=english_terms,
+            source_terms=source_terms,
+        )
 
         return {
-            "is_safety_question": bool(trigger_reasons),
+            "is_safety_question": risk_level > 0,
+            "risk_level": risk_level,
+            "risk_reasons": risk_reasons,
             "trigger_reasons": trigger_reasons,
             "question_safety_terms": question_terms,
             "question_english_safety_terms": english_terms,
@@ -138,15 +200,29 @@ class SafetyGuard:
         context: str,
         sources: list[Any],
         must_have_safety: bool | None,
+        question_type: str | None = None,
     ) -> dict[str, Any]:
         assessment = self.build_assessment(
             question=question,
             context=context,
             sources=sources,
             must_have_safety=must_have_safety,
+            question_type=question_type,
         )
-        if not assessment["is_safety_question"]:
+        if assessment["risk_level"] == 0:
             result["safety_notes"] = self._dedupe(self._ensure_list(result.get("safety_notes")))
+            return {
+                "result": result,
+                "assessment": assessment,
+                "validation": self.validate(result, assessment, should_create_workorder=False),
+            }
+        if assessment["risk_level"] == 1:
+            result["safety_notes"] = self._dedupe(
+                [
+                    *self._ensure_list(result.get("safety_notes")),
+                    *assessment.get("manual_basis", []),
+                ]
+            )
             return {
                 "result": result,
                 "assessment": assessment,
@@ -181,28 +257,47 @@ class SafetyGuard:
         should_create_workorder: bool | None,
     ) -> dict[str, Any]:
         errors: list[str] = []
-        if not assessment.get("is_safety_question"):
-            return {"passed": True, "errors": errors, "signal_count": 0, "english_terms_missing": []}
+        risk_level = int(assessment.get("risk_level", 0) or 0)
+        if risk_level <= 0:
+            return {
+                "passed": True,
+                "errors": errors,
+                "signal_count": 0,
+                "english_terms_missing": [],
+                "risk_level": risk_level,
+                "risk_reasons": assessment.get("risk_reasons", []),
+            }
 
         safety_notes = self._ensure_list(result.get("safety_notes"))
-        if not safety_notes:
+        if risk_level >= 1 and "must_have_safety" in assessment.get("trigger_reasons", []) and not safety_notes:
             errors.append("safety_notes must contain at least one item for safety questions")
-
-        missing_fields = [field for field in SAFETY_STRUCTURED_FIELDS if field not in result]
-        if missing_fields:
-            errors.append(f"missing safety structured fields: {missing_fields}")
 
         text = collect_answer_text(result)
         normalized_text = normalize_text(text)
-        signal_count = sum(1 for term in SAFETY_PASS_TERMS if normalize_text(term) in normalized_text)
-        if signal_count < 2:
-            errors.append("safety answer must contain at least two hard safety signals")
-
         english_terms_missing = [
             term
             for term in assessment.get("question_english_safety_terms", [])
             if normalize_text(term) not in normalized_text
         ]
+
+        if risk_level < 2:
+            return {
+                "passed": not errors,
+                "errors": errors,
+                "signal_count": 0,
+                "english_terms_missing": english_terms_missing,
+                "risk_level": risk_level,
+                "risk_reasons": assessment.get("risk_reasons", []),
+            }
+
+        missing_fields = [field for field in SAFETY_STRUCTURED_FIELDS if field not in result]
+        if missing_fields:
+            errors.append(f"missing safety structured fields: {missing_fields}")
+
+        signal_count = sum(1 for term in SAFETY_PASS_TERMS if normalize_text(term) in normalized_text)
+        if signal_count < 2:
+            errors.append("safety answer must contain at least two hard safety signals")
+
         if english_terms_missing:
             errors.append(f"english safety terms must be preserved: {english_terms_missing}")
 
@@ -214,6 +309,8 @@ class SafetyGuard:
             "errors": errors,
             "signal_count": signal_count,
             "english_terms_missing": english_terms_missing,
+            "risk_level": risk_level,
+            "risk_reasons": assessment.get("risk_reasons", []),
         }
 
     def build_repair_requirements(self, assessment: dict[str, Any], validation: dict[str, Any]) -> str:
@@ -320,6 +417,81 @@ class SafetyGuard:
             else:
                 source_text_parts.append(str(source))
         return self._matched_terms("\n".join(source_text_parts), SAFETY_SOURCE_TERMS)
+
+    def _classify_risk_level(
+        self,
+        question: str,
+        question_type: str,
+        must_have_safety: bool | None,
+        question_terms: list[str],
+        english_terms: list[str],
+        source_terms: list[str],
+    ) -> tuple[int, list[str]]:
+        reasons: list[str] = []
+        high_risk_terms = self._matched_terms(question, HIGH_RISK_QUESTION_TERMS)
+        level1_terms = self._matched_terms(question, LEVEL1_QUESTION_TERMS)
+
+        if question_type in {"safety_boundary", "high_risk_safety"}:
+            reasons.append(f"question_type_{question_type}")
+            if high_risk_terms:
+                reasons.append("high_risk_question_terms")
+            return 2, self._dedupe(reasons)
+
+        if question_type == "procedure_fault":
+            if high_risk_terms:
+                reasons.extend([f"question_type_{question_type}", "high_risk_question_terms"])
+                return 2, self._dedupe(reasons)
+            reasons.append(f"question_type_{question_type}")
+            return 1, self._dedupe(reasons)
+
+        if question_type in {"smoke", "parameter"}:
+            if high_risk_terms and self._has_immediate_risk_intent(question):
+                reasons.extend([f"question_type_{question_type}", "immediate_high_risk_intent"])
+                return 2, self._dedupe(reasons)
+            if must_have_safety or question_terms or english_terms or level1_terms:
+                reasons.append(f"question_type_{question_type}")
+                if must_have_safety:
+                    reasons.append("must_have_safety")
+                if question_terms or english_terms or level1_terms:
+                    reasons.append("light_safety_or_operation_terms")
+                return 1, self._dedupe(reasons)
+            return 0, []
+
+        if high_risk_terms and self._has_immediate_risk_intent(question):
+            reasons.append("immediate_high_risk_intent")
+            return 2, self._dedupe(reasons)
+        if must_have_safety or question_terms or english_terms or level1_terms:
+            if must_have_safety:
+                reasons.append("must_have_safety")
+            if question_terms or english_terms or level1_terms:
+                reasons.append("light_safety_or_operation_terms")
+            return 1, self._dedupe(reasons)
+        if source_terms:
+            return 0, []
+        return 0, []
+
+    def _has_immediate_risk_intent(self, question: str) -> bool:
+        terms = [
+            "冒烟",
+            "上电",
+            "拆卸",
+            "更换",
+            "失效",
+            "无法",
+            "不能",
+            "是否可以",
+            "能否",
+            "继续",
+            "进入",
+            "禁止",
+            "safety fence",
+            "interlocked gate",
+            "maintenance",
+            "teaching",
+            "adjustment",
+            "hazard",
+        ]
+        return bool(self._matched_terms(question, terms))
 
     def _matched_terms(self, text: str, terms: list[str]) -> list[str]:
         normalized = normalize_text(text)

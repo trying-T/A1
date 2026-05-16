@@ -5,6 +5,7 @@ from typing import Any
 from app.config import BASE_DIR
 from app.schemas.chat_schema import RepairChatRequest, RepairChatResponse, SourceItem
 from app.services.answer_repair import AnswerRepair
+from app.services.document_intent_service import DocumentIntentService
 from app.services.embedding_service import EmbeddingError
 from app.services.industrial_term_service import IndustrialTermService
 from app.services.llm_service import LLMError, LLMService
@@ -22,6 +23,7 @@ class RagService:
         self.llm_service = LLMService()
         self.safety_service = SafetyService()
         self.safety_guard = SafetyGuard()
+        self.document_intent_service = DocumentIntentService()
         self.industrial_term_service = IndustrialTermService()
         self.term_preserver = TermPreserver(industrial_term_service=self.industrial_term_service)
         self.answer_repair_service = AnswerRepair()
@@ -65,13 +67,18 @@ class RagService:
                 should_create_workorder=should_create_workorder,
                 auto_create_workorder=auto_create_workorder,
                 matched_industrial_terms=[],
+                document_intent_debug=self._empty_document_intent_debug(),
                 parsed=parsed,
                 answer="",
                 sources=[],
             )
 
-        sources = [self._source_from_result(result) for result in retrieval_response.results]
-        context = self._build_context(retrieval_response.results)
+        reranked_results, document_intent_debug = self.document_intent_service.rerank(
+            question,
+            retrieval_response.results,
+        )
+        sources = [self._source_from_result(result) for result in reranked_results]
+        context = self._build_context(reranked_results)
         matched_industrial_terms = self.industrial_term_service.match_terms(question=question, context=context)
         required_terms = required_keywords or self.term_preserver.extract_required_terms(question=question, context=context)
         messages = [
@@ -104,10 +111,20 @@ class RagService:
             should_create_workorder=should_create_workorder,
             auto_create_workorder=auto_create_workorder,
             matched_industrial_terms=matched_industrial_terms,
+            document_intent_debug=document_intent_debug,
             parsed=parsed,
             answer=self._ensure_text(parsed.get("answer"), default=raw_answer),
             sources=sources,
         )
+
+    def _empty_document_intent_debug(self) -> dict[str, Any]:
+        return {
+            "document_intent": {"matched_entities": [], "preferred_documents": []},
+            "matched_entities": [],
+            "preferred_documents": [],
+            "rerank_applied": False,
+            "rerank_reason": "retrieval_not_available",
+        }
 
     def _build_response(
         self,
@@ -123,10 +140,12 @@ class RagService:
         parsed: dict[str, Any],
         answer: str,
         sources: list[SourceItem],
+        document_intent_debug: dict[str, Any] | None = None,
     ) -> RepairChatResponse:
         fault_understanding = self._ensure_text(parsed.get("fault_understanding"))
         possible_causes = self._ensure_list(parsed.get("possible_causes"))
         repair_steps = self._ensure_list(parsed.get("repair_steps"))
+        inspection_steps = self._ensure_list(parsed.get("inspection_steps"))
         safety_notes = self.safety_service.enhance_safety_notes(
             question=question,
             fault_understanding=fault_understanding,
@@ -140,6 +159,7 @@ class RagService:
             "fault_understanding": fault_understanding,
             "possible_causes": possible_causes,
             "repair_steps": repair_steps,
+            "inspection_steps": inspection_steps,
             "safety_notes": safety_notes,
             "operation_allowed": parsed.get("operation_allowed"),
             "immediate_actions": self._ensure_list(parsed.get("immediate_actions")),
@@ -155,15 +175,18 @@ class RagService:
             context=context,
             sources=[source.model_dump() for source in sources],
             must_have_safety=must_have_safety,
+            question_type=question_type,
         )
         guarded_result = guarded_payload["result"]
         work_order_recommendation = self._build_work_order_recommendation(
             question=question,
+            question_type=question_type,
             equipment_type=equipment_type,
             result=guarded_result,
             sources=sources,
             should_create_workorder=should_create_workorder,
             safety_assessment=guarded_payload["assessment"],
+            required_terms=required_terms,
         )
         validation_before_repair = self._validate_answer(
             result=guarded_result,
@@ -192,15 +215,19 @@ class RagService:
             context=context,
             sources=[source.model_dump() for source in sources],
             must_have_safety=must_have_safety,
+            question_type=question_type,
         )
         repaired = final_guarded_payload["result"]
+        self._ensure_matched_terms_preserved(repaired, matched_industrial_terms)
         work_order_recommendation = self._build_work_order_recommendation(
             question=question,
+            question_type=question_type,
             equipment_type=equipment_type,
             result=repaired,
             sources=sources,
             should_create_workorder=should_create_workorder,
             safety_assessment=final_guarded_payload["assessment"],
+            required_terms=required_terms,
         )
         validation_after_repair = self._validate_answer(
             result=repaired,
@@ -218,6 +245,8 @@ class RagService:
             "required_terms": required_terms,
             "term_aliases_used": self.term_preserver.aliases(),
             "matched_industrial_terms": matched_industrial_terms,
+            **(document_intent_debug or {}),
+            "work_order_recommendation": work_order_recommendation,
             "safety_guard_assessment": final_guarded_payload["assessment"],
             "validation_before_repair": validation_before_repair,
             "validation_after_repair": validation_after_repair,
@@ -283,11 +312,13 @@ class RagService:
         )
         term_check = self.industrial_term_service.validate_preservation(result, matched_industrial_terms)
         workorder_check = self._validate_work_order_recommendation(work_order_recommendation)
+        work_order_quality_check = self._work_order_quality_check(work_order_recommendation)
         checks = {
             "keyword_check": keyword_check,
             "safety_check": safety_check,
             "term_check": term_check,
             "workorder_check": workorder_check,
+            "work_order_quality_check": work_order_quality_check,
         }
         errors = [error for check in checks.values() for error in check.get("errors", [])]
         repair_requirements = [
@@ -315,7 +346,33 @@ class RagService:
             "safety_guard": safety_check,
             "industrial_terms": term_check,
             "is_safety_question": safety_assessment.get("is_safety_question", False),
+            "risk_level": safety_assessment.get("risk_level", 0),
+            "risk_reasons": safety_assessment.get("risk_reasons", []),
         }
+
+    def _ensure_matched_terms_preserved(
+        self,
+        result: dict[str, Any],
+        matched_industrial_terms: list[dict[str, Any]],
+    ) -> None:
+        term_check = self.industrial_term_service.validate_preservation(result, matched_industrial_terms)
+        missing_terms = term_check.get("missing_preserved_terms", [])
+        if not missing_terms:
+            return
+
+        term_lookup = {str(term.get("canonical")): term for term in matched_industrial_terms}
+        notes = []
+        for canonical in missing_terms:
+            term = term_lookup.get(str(canonical), {})
+            zh = str(term.get("zh", "")).strip()
+            notes.append(f"{canonical}（{zh}）" if zh else str(canonical))
+        if not notes:
+            return
+
+        suffix = "术语保留说明：" + "、".join(notes)
+        answer = self._ensure_text(result.get("answer"), default="")
+        if suffix not in answer:
+            result["answer"] = f"{answer}\n\n{suffix}" if answer else suffix
 
     def _validate_required_terms(self, result: dict[str, Any], required_terms: list[str]) -> dict[str, Any]:
         from app.services.answer_validator import validate_required_keywords
@@ -343,53 +400,162 @@ class RagService:
     def _build_work_order_recommendation(
         self,
         question: str,
+        question_type: str | None,
         equipment_type: str | None,
         result: dict[str, Any],
         sources: list[SourceItem],
         should_create_workorder: bool | None,
         safety_assessment: dict[str, Any],
+        required_terms: list[str],
     ) -> dict[str, Any]:
         reasons = []
+        explicit_execution_intent = self._has_explicit_workorder_intent(question)
+        normalized_question_type = (question_type or "").strip().lower()
+        is_direct_workorder_type = normalized_question_type in {
+            "procedure_fault",
+            "safety_boundary",
+            "high_risk_safety",
+        }
+        high_risk_safety = int(safety_assessment.get("risk_level", 0) or 0) >= 2
         if should_create_workorder:
             reasons.append("request_should_create_workorder")
-        if safety_assessment.get("is_safety_question"):
+        if is_direct_workorder_type:
+            reasons.append(f"question_type_{normalized_question_type}")
+        if explicit_execution_intent:
+            reasons.append("explicit_execution_intent")
+        if (
+            normalized_question_type not in {"smoke", "parameter"}
+            and high_risk_safety
+        ):
             reasons.append("safety_or_risk_related")
-        if self._looks_like_workorder_question(question):
+        if normalized_question_type not in {"smoke", "parameter"} and self._looks_like_workorder_question(question):
             reasons.append("fault_or_maintenance_intent")
 
+        repair_steps = self._ensure_list(result.get("repair_steps"))
+        inspection_steps = self._ensure_list(result.get("inspection_steps")) or repair_steps
+        safety_actions = self._ensure_list(result.get("safety_actions"))
         payload_preview = {
             "equipment_type": equipment_type,
             "fault_symptom": question,
             "fault_understanding": self._ensure_text(result.get("fault_understanding")),
             "possible_causes": self._ensure_list(result.get("possible_causes")),
-            "repair_steps": self._ensure_list(result.get("repair_steps")),
+            "repair_steps": repair_steps,
+            "inspection_steps": inspection_steps,
+            "key_parameters": self._extract_key_parameters(required_terms),
             "safety_notes": self._ensure_list(result.get("safety_notes")),
-            "safety_actions": self._ensure_list(result.get("safety_actions")),
+            "safety_actions": safety_actions,
             "source_chunk_ids": [source.chunk_id for source in sources],
+            "missing_fields": [],
             "sources": [source.model_dump() for source in sources],
             "operator_note": "Generated from RAG work_order_recommendation.",
         }
-        return {
-            "ready_to_create": bool(reasons),
+        recommendation = {
+            "should_create_workorder": bool(should_create_workorder),
+            "recommend_workorder": bool(reasons),
+            "ready_to_create": False,
             "reason": ", ".join(reasons) if reasons else "no_workorder_intent_detected",
+            "explicit_execution_intent": explicit_execution_intent,
             "payload_preview": payload_preview,
         }
+        quality_check = self._work_order_quality_check(
+            recommendation,
+            question_type=normalized_question_type,
+        )
+        payload_preview["missing_fields"] = quality_check["missing_fields"]
+        recommendation["ready_to_create"] = quality_check["ready_to_create"]
+        recommendation["work_order_quality_check"] = quality_check
+        if quality_check["missing_fields"]:
+            recommendation["reason"] = (
+                f"{recommendation['reason']}; missing_fields={quality_check['missing_fields']}"
+            )
+        return recommendation
 
     def _validate_work_order_recommendation(self, recommendation: dict[str, Any]) -> dict[str, Any]:
         errors = []
+        for field in ["should_create_workorder", "recommend_workorder", "ready_to_create"]:
+            if field not in recommendation:
+                errors.append(f"work_order_recommendation missing {field}")
         if "ready_to_create" not in recommendation:
             errors.append("work_order_recommendation missing ready_to_create")
         payload = recommendation.get("payload_preview")
         if not isinstance(payload, dict):
             errors.append("work_order_recommendation missing payload_preview")
         else:
-            for field in ["fault_symptom", "repair_steps", "safety_actions", "source_chunk_ids"]:
+            for field in [
+                "fault_symptom",
+                "repair_steps",
+                "inspection_steps",
+                "key_parameters",
+                "safety_actions",
+                "source_chunk_ids",
+                "missing_fields",
+            ]:
                 if field not in payload:
                     errors.append(f"work_order_recommendation payload_preview missing {field}")
         return {
             "passed": not errors,
             "errors": errors,
             "ready_to_create": bool(recommendation.get("ready_to_create")),
+            "recommend_workorder": bool(recommendation.get("recommend_workorder")),
+        }
+
+    def _work_order_quality_check(
+        self,
+        recommendation: dict[str, Any],
+        question_type: str | None = None,
+    ) -> dict[str, Any]:
+        payload = recommendation.get("payload_preview")
+        missing_fields: list[str] = []
+        if not isinstance(payload, dict):
+            return {
+                "passed": False,
+                "errors": ["work_order_recommendation missing payload_preview"],
+                "ready_to_create": False,
+                "recommend_workorder": bool(recommendation.get("recommend_workorder")),
+                "missing_fields": ["payload_preview"],
+            }
+        if question_type is None and isinstance(recommendation.get("work_order_quality_check"), dict):
+            return recommendation["work_order_quality_check"]
+
+        recommend_workorder = bool(recommendation.get("recommend_workorder"))
+        normalized_question_type = (question_type or "").strip().lower()
+        repair_steps = self._ensure_list(payload.get("repair_steps"))
+        inspection_steps = self._ensure_list(payload.get("inspection_steps"))
+        safety_actions = self._ensure_list(payload.get("safety_actions"))
+        source_chunk_ids = self._ensure_list(payload.get("source_chunk_ids"))
+
+        if not recommend_workorder:
+            ready_to_create = False
+        else:
+            if not self._ensure_text(payload.get("fault_symptom"), default=""):
+                missing_fields.append("fault_symptom")
+            if not source_chunk_ids:
+                missing_fields.append("source_chunk_ids")
+            if normalized_question_type in {"smoke", "parameter"} and not recommendation.get(
+                "explicit_execution_intent"
+            ):
+                missing_fields.append("explicit_execution_intent")
+            if normalized_question_type in {"procedure_fault", "safety_boundary"} and not (
+                repair_steps or inspection_steps
+            ):
+                missing_fields.append("repair_steps_or_inspection_steps")
+            if normalized_question_type in {"safety_boundary", "high_risk_safety"} and not safety_actions:
+                missing_fields.append("safety_actions")
+            if not repair_steps and not safety_actions:
+                missing_fields.append("repair_steps_or_safety_actions")
+            ready_to_create = not missing_fields
+
+        consistency_errors = []
+        if recommendation.get("ready_to_create") and missing_fields:
+            consistency_errors.append(
+                f"ready_to_create must be false when missing fields exist: {missing_fields}"
+            )
+        return {
+            "passed": not consistency_errors,
+            "errors": consistency_errors,
+            "ready_to_create": ready_to_create,
+            "recommend_workorder": recommend_workorder,
+            "missing_fields": missing_fields,
         }
 
     def _maybe_create_work_order(
@@ -453,6 +619,43 @@ class RagService:
         ]
         normalized = question.lower()
         return any(keyword.lower() in normalized for keyword in keywords)
+
+    def _has_explicit_workorder_intent(self, question: str) -> bool:
+        keywords = [
+            "故障",
+            "拆卸",
+            "更换",
+            "无法运行",
+            "不能运行",
+            "无法启动",
+            "冒烟",
+            "失效",
+            "危险",
+            "维修",
+            "检修",
+            "异常",
+            "fault",
+            "failure",
+            "failed",
+            "replace",
+            "remove",
+            "disassemble",
+            "smoke",
+            "danger",
+            "hazard",
+            "cannot run",
+            "not running",
+        ]
+        normalized = question.lower()
+        return any(keyword.lower() in normalized for keyword in keywords)
+
+    def _extract_key_parameters(self, required_terms: list[str]) -> list[str]:
+        parameters = []
+        for term in required_terms:
+            text = str(term).strip()
+            if text and (re.search(r"\d", text) or re.search(r"[a-zA-Z]+[·/.-]?[a-zA-Z]*", text)):
+                parameters.append(text)
+        return parameters
 
     def _build_context(self, results: list[Any]) -> str:
         if not results:

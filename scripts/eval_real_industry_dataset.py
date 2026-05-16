@@ -163,16 +163,25 @@ def check_safety_notes(payload: dict[str, Any], must_have_safety: bool) -> dict[
 
 
 def check_safety_guard(payload: dict[str, Any], item: dict[str, Any]) -> dict[str, Any]:
-    if not item["must_have_safety"]:
+    validation = payload.get("validation", {})
+    safety_guard = validation.get("safety_guard", {}) if isinstance(validation, dict) else {}
+    risk_level = int(validation.get("risk_level", safety_guard.get("risk_level", 0)) or 0)
+    if not item["must_have_safety"] and risk_level < 2:
         return {"passed": True, "errors": []}
 
     errors = []
-    validation = payload.get("validation", {})
-    safety_guard = validation.get("safety_guard", {}) if isinstance(validation, dict) else {}
     if validation.get("validation_passed") is not True:
         errors.append("RAG validation_passed should be true for accepted safety answers")
     if safety_guard.get("passed") is not True:
         errors.append(f"Safety Guard validation failed: {safety_guard.get('errors', [])}")
+
+    if risk_level < 2:
+        return {
+            "passed": not errors,
+            "errors": errors,
+            "safety_guard": safety_guard,
+            "risk_level": risk_level,
+        }
 
     for field in [
         "operation_allowed",
@@ -189,7 +198,7 @@ def check_safety_guard(payload: dict[str, Any], item: dict[str, Any]) -> dict[st
         elif not isinstance(value, list) or not any(str(item).strip() for item in value):
             errors.append(f"{field} must be a non-empty list for safety questions")
 
-    return {"passed": not errors, "errors": errors, "safety_guard": safety_guard}
+    return {"passed": not errors, "errors": errors, "safety_guard": safety_guard, "risk_level": risk_level}
 
 
 def check_source_fields(payload: dict[str, Any]) -> dict[str, Any]:
@@ -311,6 +320,10 @@ def contains_safety_signal(safety_notes: list[Any]) -> bool:
         "安全",
         "危险",
         "警告",
+        "注意",
+        "务必",
+        "防止",
+        "确保",
         "断电",
         "电源",
         "停止",
@@ -489,6 +502,14 @@ def render_question_report(index: int, result: dict[str, Any]) -> list[str]:
                     "answer_validator_after_repair": debug.get("answer_validator_after_repair", {}),
                     "safety_guard_assessment": debug.get("safety_guard_assessment", {}),
                     "safety_guard_before_repair": debug.get("safety_guard_before_repair", {}),
+                    "risk_level": validation.get("risk_level", 0),
+                    "risk_reasons": validation.get("risk_reasons", []),
+                    "document_intent": debug.get("document_intent", {}),
+                    "matched_entities": debug.get("matched_entities", []),
+                    "preferred_documents": debug.get("preferred_documents", []),
+                    "rerank_applied": debug.get("rerank_applied", False),
+                    "rerank_reason": debug.get("rerank_reason", ""),
+                    "work_order_recommendation": rag.get("work_order_recommendation", {}),
                     "validation": validation,
                 },
                 ensure_ascii=False,

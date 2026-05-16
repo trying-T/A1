@@ -39,6 +39,7 @@ class SafetyGuardTest(unittest.TestCase):
         ).lower()
 
         self.assertTrue(payload["assessment"]["is_safety_question"])
+        self.assertEqual(payload["assessment"]["risk_level"], 2)
         self.assertIn(guarded["operation_allowed"], ["不允许", "需要先满足条件", "资料不足无法确认"])
         self.assertTrue(guarded["immediate_actions"])
         self.assertTrue(guarded["prohibited_actions"])
@@ -67,7 +68,52 @@ class SafetyGuardTest(unittest.TestCase):
         )
 
         self.assertFalse(payload["assessment"]["is_safety_question"])
+        self.assertEqual(payload["assessment"]["risk_level"], 0)
         self.assertEqual(payload["result"]["answer"], result["answer"])
+
+    def test_must_have_safety_is_level_one_not_hard_template(self) -> None:
+        guard = SafetyGuard()
+        result = {
+            "answer": "该手册说明日常维护关注点。",
+            "fault_understanding": "资料概览问题。",
+            "possible_causes": [],
+            "repair_steps": [],
+            "safety_notes": ["关注手册中的安全提示。"],
+        }
+        payload = guard.apply(
+            result=result,
+            question="日常维护时应关注哪些安全提示？",
+            context="WARNING: Read safety notes before maintenance.",
+            sources=[{"filename": "safety manual.pdf", "document_title": "Safety manual", "metadata": {}}],
+            must_have_safety=True,
+            question_type="smoke",
+        )
+
+        self.assertEqual(payload["assessment"]["risk_level"], 1)
+        self.assertNotIn("operation_allowed", payload["result"])
+        self.assertNotIn("safety_actions", payload["result"])
+        self.assertEqual(payload["result"]["answer"], result["answer"])
+
+    def test_safety_boundary_is_level_two(self) -> None:
+        guard = SafetyGuard()
+        payload = guard.apply(
+            result={
+                "answer": "不能继续生产。",
+                "fault_understanding": "安全装置失效。",
+                "possible_causes": [],
+                "repair_steps": [],
+                "safety_notes": [],
+            },
+            question="safety fence 或 interlocked gate 失效时是否可以继续生产？",
+            context="WARNING: safety fence open means robot motion must stop.",
+            sources=[{"filename": "safety manual.pdf", "document_title": "Safety manual", "metadata": {}}],
+            must_have_safety=True,
+            question_type="safety_boundary",
+        )
+
+        self.assertEqual(payload["assessment"]["risk_level"], 2)
+        self.assertTrue(payload["result"]["safety_actions"])
+        self.assertIn("operation_allowed", payload["result"])
 
 
 if __name__ == "__main__":
